@@ -6,6 +6,7 @@ Nsight Compute 采集器。
 
 import subprocess
 import os
+import shutil
 import sys
 from pathlib import Path
 from dataclasses import dataclass
@@ -13,6 +14,21 @@ from typing import Optional, Dict
 
 from .ncu_metrics import NCU_METRIC_LIST, parse_ncu_csv, KernelMetrics
 from .kernel_classifier import classify_kernel, KernelCategory
+
+
+def _find_ncu() -> str:
+    """查找 ncu 可执行文件路径。"""
+    ncu = shutil.which("ncu")
+    if ncu:
+        return ncu
+    candidates = [
+        "/opt/nvidia/nsight-compute/2025.1.1/ncu",
+        "/opt/nvidia/nsight-compute/2025.1.1/target/linux-desktop-glibc_2_11_3-x64/ncu",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    raise FileNotFoundError("ncu not found. Install Nsight Compute or set PATH.")
 
 
 @dataclass
@@ -28,11 +44,14 @@ class NCUResult:
 def run_ncu_profile(model: str, quantization: str, tp_degree: int,
                     batch_size: int, seq_len: int, phase: str,
                     vllm_runner_path: str, output_dir: str = "/tmp/mlwd_ncu",
-                    launch_count: int = 3) -> NCUResult:
+                    launch_count: int = 10,
+                    launch_skip: int = 500) -> NCUResult:
     """
     对单个实验点运行 ncu profiling。
 
     通过 ncu 包装 vllm_runner.py 子进程，采集 kernel 级硬件 counter。
+    使用 application-level replay 避免 kernel replay 导致显存翻倍。
+    使用 launch-skip 跳过模型加载阶段的 kernel。
     """
     os.makedirs(output_dir, exist_ok=True)
     csv_path = os.path.join(
@@ -40,12 +59,23 @@ def run_ncu_profile(model: str, quantization: str, tp_degree: int,
         f"ncu_{model.replace('/', '_')}_{quantization}_tp{tp_degree}_b{batch_size}_s{seq_len}_{phase}.csv"
     )
 
+    # 强制 vLLM 使用单进程 V0 引擎，避免 ncu 无法跟踪多进程
+    env = os.environ.copy()
+    env["VLLM_USE_V1"] = "0"
+
     # 构造 ncu 命令
+    # --replay-mode application: 重放整个应用而非单个 kernel，避免显存翻倍
+    # --launch-skip: 跳过模型加载阶段的 kernel（权重加载、初始化等）
+    # --launch-count: 只采集少量推理阶段的 kernel
+    ncu_bin = _find_ncu()
+
     cmd = [
-        "ncu",
+        ncu_bin,
         "--csv",
         "--metrics", NCU_METRIC_LIST,
         "--kernel-name-base", "demangled",
+        "--replay-mode", "application",
+        "--launch-skip", str(launch_skip),
         "--launch-count", str(launch_count),
         "--target-processes", "all",
         "--log-file", csv_path,
@@ -58,14 +88,21 @@ def run_ncu_profile(model: str, quantization: str, tp_degree: int,
         "--phase", phase,
         "--num_runs", "1",
         "--warmup_runs", "1",
+        "--gpu_mem", "0.85",
     ]
 
     print(f"[NCU] Running: {' '.join(cmd[:8])}...")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200, env=env)
 
     if result.returncode != 0:
-        print(f"[NCU] Error (rc={result.returncode}): {result.stderr[:500]}")
-        return NCUResult()
+        # ncu 的 stderr 经常混入 FutureWarning 等无害输出，检查是否有实际错误
+        stderr = result.stderr
+        # 如果 CSV 文件已生成，忽略 returncode 继续解析
+        if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
+            print(f"[NCU] Warning: rc={result.returncode} but CSV exists, attempting parse")
+        else:
+            print(f"[NCU] Error (rc={result.returncode}):\n{stderr[-1000:]}")
+            return NCUResult()
 
     # 解析 CSV 输出
     try:
