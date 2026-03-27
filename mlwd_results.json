@@ -1,0 +1,106 @@
+{
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s32_prefill": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 32,
+    "phase": "prefill",
+    "baseline_ms": 32.9272,
+    "baseline_all_ms": [
+      31.1148,
+      31.3723,
+      32.9272,
+      32.9395,
+      40.2138
+    ],
+    "sigma_bs": 1.257754,
+    "sigma_bs_stressed_ms": 74.3414,
+    "sigma_bs_all_ms": [
+      33.6013,
+      34.002,
+      74.3414,
+      88.1962,
+      106.1326
+    ],
+    "sigma_cu": 2.037031,
+    "sigma_cu_stressed_ms": 100.0009,
+    "sigma_cu_all_ms": [
+      97.0765,
+      99.1346,
+      100.0009,
+      100.8006,
+      149.203
+    ],
+    "sigma_l2": 2.026072,
+    "sigma_l2_stressed_ms": 99.64,
+    "sigma_l2_all_ms": [
+      95.9364,
+      97.9776,
+      99.64,
+      100.2158,
+      104.2764
+    ],
+    "sigma_bw": 2.032373,
+    "sigma_bw_stressed_ms": 99.8475,
+    "sigma_bw_all_ms": [
+      99.3322,
+      99.5806,
+      99.8475,
+      99.9015,
+      100.9106
+    ]
+  },
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s32_decode": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 32,
+    "phase": "decode",
+    "baseline_ms": 1030.2732,
+    "baseline_all_ms": [
+      1010.6704,
+      1015.3351,
+      1030.2732,
+      1137.2632,
+      1153.1825
+    ],
+    "sigma_bs": 1.251888,
+    "sigma_bs_stressed_ms": 2320.0598,
+    "sigma_bs_all_ms": [
+      2244.968,
+      2316.4097,
+      2320.0598,
+      2354.8892,
+      2365.8104
+    ],
+    "sigma_cu": 1.312052,
+    "sigma_cu_stressed_ms": 2382.0453,
+    "sigma_cu_all_ms": [
+      2228.146,
+      2300.1966,
+      2382.0453,
+      2384.6364,
+      2389.249
+    ],
+    "sigma_l2": 1.27674,
+    "sigma_l2_stressed_ms": 2345.6638,
+    "sigma_l2_all_ms": [
+      2244.1775,
+      2298.8792,
+      2345.6638,
+      2354.0116,
+      2457.2994
+    ],
+    "sigma_bw": 1.319212,
+    "sigma_bw_stressed_ms": 2389.4219,
+    "sigma_bw_all_ms": [
+      2300.468,
+      2366.684,
+      2389.4219,
+      2396.8882,
+      2398.4471
+    ]
+  }
+}
