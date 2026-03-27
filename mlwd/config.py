@@ -17,7 +17,7 @@ V100_CUDA_ARCH = 70
 
 
 # ── 实验矩阵默认值 ────────────────────────────────────────────
-DEFAULT_MODELS = ["meta-llama/Llama-2-7b-hf", "Qwen/Qwen2-7B"]
+DEFAULT_MODELS = ["/data/Qwen/Qwen2.5-7B-Instruct"]
 DEFAULT_FRAMEWORK = "vllm"
 DEFAULT_QUANTIZATIONS = ["fp16"]
 DEFAULT_TP_DEGREES = [1]

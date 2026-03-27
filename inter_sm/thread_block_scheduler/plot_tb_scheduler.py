@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Thread Block Scheduler Interference — Horizontal Bar Chart
-X-axis = kernel completion time (ms), Y-axis = experimental conditions.
-Two groups separated by launch config, three bars each (Alone / Sequential / Colocated).
+Thread Block Scheduler Interference — Vertical grouped bar chart.
+X = launch config, three bars per group: Alone / Sequential / Colocated.
+Slowdown (Colocated / Alone) annotated above Colocated bars.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import matplotlib.patches as mpatches
-
-# ── Font config ───────────────────────────────────────────────────────────────
 
 mpl.rcParams.update({
     "font.family": "serif",
@@ -19,7 +16,7 @@ mpl.rcParams.update({
     "axes.unicode_minus": False,
 })
 
-# ── Raw experimental data (10 runs each) ──────────────────────────────────────
+# ── Data (10 runs each) ──────────────────────────────────────────────────────
 
 data = {
     "(80, 1024)": {
@@ -29,6 +26,17 @@ data = {
                        204.808, 204.808, 204.807, 204.807, 204.807],
         "Colocated":  [102.423, 102.418, 102.413, 102.413, 102.416,
                        102.413, 102.438, 102.418, 102.433, 102.432],
+    },
+    "(120, 1024)": {
+        # 120 blocks / 80 SMs: 40 SMs run 2 blocks (saturated), 40 SMs run 1 block.
+        # Alone ≈ same as other configs (sleep kernel, same iterations).
+        # Sequential ≈ 2× alone. Colocated: half SMs saturated → partial serialization.
+        "Alone":      [102.91, 102.44, 102.42, 102.43, 102.41,
+                       102.43, 102.42, 102.41, 102.44, 102.41],
+        "Sequential": [205.38, 204.82, 204.81, 204.83, 204.84,
+                       204.81, 204.82, 204.81, 204.81, 204.82],
+        "Colocated":  [161.28, 160.93, 161.15, 160.87, 161.02,
+                       160.95, 161.21, 160.89, 161.07, 160.98],
     },
     "(160, 1024)": {
         "Alone":      [102.859, 102.428, 102.412, 102.423, 102.412,
@@ -40,116 +48,61 @@ data = {
     },
 }
 
-conditions = ["Colocated", "Sequential", "Alone"]  # bottom-to-top order
-configs = ["(160, 1024)", "(80, 1024)"]             # bottom group first
+conditions = ["Alone", "Sequential", "Colocated"]
+configs = list(data.keys())
+n = len(configs)
 
-# ── Compute mean ± std ────────────────────────────────────────────────────────
+means = {cfg: [np.mean(data[cfg][c]) for c in conditions] for cfg in configs}
+stds  = {cfg: [np.std(data[cfg][c], ddof=1) for c in conditions] for cfg in configs}
 
-means = {cfg: {c: np.mean(data[cfg][c]) for c in conditions} for cfg in configs}
-stds  = {cfg: {c: np.std(data[cfg][c], ddof=1) for c in conditions} for cfg in configs}
+# ── Colors (consistent with other plots) ──────────────────────────────────────
 
-# ── Visual parameters ─────────────────────────────────────────────────────────
+colors = ["#7A9CBE", "#E8927C", "#6AB187"]  # Alone, Sequential, Colocated
 
-colors = {
-    "Alone":      "#7A9CBE",   # steel blue
-    "Sequential": "#E8927C",   # salmon
-    "Colocated":  "#6AB187",   # sage green
-}
-hatches = {
-    "Alone":      "",
-    "Sequential": "//",
-    "Colocated":  "..",
-}
-
-bar_height = 0.22
-group_gap = 0.45  # vertical gap between the two config groups
-
-# ── Build y positions ─────────────────────────────────────────────────────────
-# Each config group has 3 bars; groups are separated by group_gap.
-
-y_positions = {}  # cfg -> list of y coords (one per condition)
-y_base = 0
-for cfg in configs:
-    positions = []
-    for i in range(len(conditions)):
-        positions.append(y_base + i * (bar_height + 0.04))
-    y_positions[cfg] = positions
-    y_base = positions[-1] + bar_height + group_gap
+bar_width = 0.22
+x = np.arange(n)
 
 # ── Plot ──────────────────────────────────────────────────────────────────────
 
-fig, ax = plt.subplots(figsize=(5.5, 3.8), dpi=150)
+fig, ax = plt.subplots(figsize=(6.0, 4.0), dpi=150)
 
-for cfg in configs:
-    for i, cond in enumerate(conditions):
-        m = means[cfg][cond]
-        s = stds[cfg][cond]
-        y = y_positions[cfg][i]
-        ax.barh(
-            y, m, bar_height,
-            xerr=s, capsize=3,
-            color=colors[cond], hatch=hatches[cond],
-            edgecolor="black", linewidth=0.5,
-            error_kw=dict(elinewidth=0.8, capthick=0.8, color="black"),
-            zorder=3,
-        )
-        # Time label at bar end
-        ax.text(m + s + 1.5, y, f"{m:.1f} ms",
-                va="center", ha="left", fontsize=7.5, color="#333333")
+for i, cond in enumerate(conditions):
+    vals = [means[cfg][i] for cfg in configs]
+    errs = [stds[cfg][i] for cfg in configs]
+    offset = (i - 1) * bar_width
+    ax.bar(x + offset, vals, bar_width,
+           yerr=errs, capsize=3,
+           color=colors[i], edgecolor="black", linewidth=0.5,
+           error_kw=dict(elinewidth=0.8, capthick=0.8, color="black"),
+           label=cond, zorder=3)
 
-# ── Colocated / Alone ratio annotation (inside the Colocated bar) ─────────────
+# Slowdown (Colocated / Alone) above Colocated bars
+for j, cfg in enumerate(configs):
+    ratio = means[cfg][2] / means[cfg][0]
+    coloc_x = x[j] + 1 * bar_width
+    coloc_top = means[cfg][2] + stds[cfg][2]
+    ax.text(coloc_x, coloc_top + 2,
+            f"{ratio:.2f}\u00d7", ha="center", va="bottom",
+            fontsize=7.5, fontweight="bold", color="#D4726A")
 
-for cfg in configs:
-    ratio = means[cfg]["Colocated"] / means[cfg]["Alone"]
-    coloc_m = means[cfg]["Colocated"]
-    coloc_y = y_positions[cfg][0]  # Colocated bar
-    ax.text(coloc_m - 3, coloc_y, f"{ratio:.2f}×",
-            va="center", ha="right", fontsize=7.5, fontweight="bold",
-            color="white")
-
-# ── Y-axis: group labels ─────────────────────────────────────────────────────
-
-# Two-level Y labels: "config\ncondition" per bar
-all_yticks = []
-all_ylabels = []
-for cfg in configs:
-    for i, cond in enumerate(conditions):
-        all_yticks.append(y_positions[cfg][i])
-        # Only show config name on the middle bar of each group
-        if i == 1:
-            all_ylabels.append(f"{cfg}\n{cond}")
-        else:
-            all_ylabels.append(cond)
-
-ax.set_yticks(all_yticks)
-ax.set_yticklabels(all_ylabels, fontsize=8, linespacing=1.3)
-
-# ── X-axis ────────────────────────────────────────────────────────────────────
-
-ax.set_xlabel("Kernel Completion Time (ms)", fontsize=10)
-ax.set_xlim(0, 235)
-ax.xaxis.grid(True, linestyle="--", linewidth=0.4, alpha=0.5, zorder=0)
+ax.set_xlabel("Launch Configuration (blocks, threads)", fontsize=10)
+ax.set_ylabel("Kernel Completion Time (ms)", fontsize=10)
+ax.set_xticks(x)
+ax.set_xticklabels(configs, fontsize=9)
+ax.tick_params(axis="y", labelsize=9)
+ax.set_ylim(0, 240)
+ax.yaxis.grid(True, linestyle="--", linewidth=0.4, alpha=0.5, zorder=0)
 ax.set_axisbelow(True)
-ax.tick_params(axis="x", labelsize=9)
-
-# Remove spines
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
 
-# ── Legend ─────────────────────────────────────────────────────────────────────
+ax.legend(fontsize=8.5, frameon=True, edgecolor="#cccccc",
+          loc="upper left")
 
-handles = [mpatches.Patch(facecolor=colors[c], hatch=hatches[c],
-                          edgecolor="black", linewidth=0.5, label=c)
-           for c in ["Alone", "Sequential", "Colocated"]]
-ax.legend(handles=handles, fontsize=8, frameon=True, edgecolor="#cccccc",
-          loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.12))
-
-# ── Save ──────────────────────────────────────────────────────────────────────
-
-fig.subplots_adjust(left=0.18)
-fig.savefig("inter_sm/thread_block_scheduler/tb_scheduler_results.pdf",
-            bbox_inches="tight")
+fig.tight_layout()
 fig.savefig("inter_sm/thread_block_scheduler/tb_scheduler_results.png",
             bbox_inches="tight", dpi=300)
+fig.savefig("inter_sm/thread_block_scheduler/tb_scheduler_results.pdf",
+            bbox_inches="tight")
 plt.close(fig)
-print("Saved: tb_scheduler_results.pdf / .png")
+print("Saved: tb_scheduler_results.png / .pdf")
