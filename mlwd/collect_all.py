@@ -1,105 +1,72 @@
 """
 MLWD 离线采集主编排脚本。
 
-串联 ncu profiling → nsys profiling → 干扰敏感度采集三个阶段，
-支持分阶段运行和断点续采。
+采集结果存储为 JSON 文件，每个实验点采集完一个维度就立即写入。
 
 Usage:
-    # 完整采集
-    python -m mlwd.collect_all --model meta-llama/Llama-2-7b-hf
+    # 完整采集（仅 sensitivity，ncu/nsys 暂不可用）
+    python -m mlwd.collect_all --model /data/Qwen/Qwen2.5-7B-Instruct --stage sensitivity
 
-    # 仅采集 ncu
-    python -m mlwd.collect_all --model meta-llama/Llama-2-7b-hf --stage ncu
+    # 指定 batch_size 和 seq_len
+    python -m mlwd.collect_all --model /data/Qwen/Qwen2.5-7B-Instruct --stage sensitivity --batch_sizes 1 --seq_lengths 32
 
-    # 仅采集敏感度
-    python -m mlwd.collect_all --model meta-llama/Llama-2-7b-hf --stage sensitivity
+    # 完整矩阵
+    python -m mlwd.collect_all --model /data/Qwen/Qwen2.5-7B-Instruct --stage sensitivity --batch_sizes 1 4 16 --seq_lengths 32 64 128 512 2048
 """
 
 import argparse
 import os
-import sys
 import json
+import time
+import threading
 from pathlib import Path
+from itertools import product
 
 from .config import ExperimentConfig, StressKernelConfig
-from .storage.mlwd_schema import DeploymentConfig, OperatorProfile
-from .storage.mlwd_db import MLWDDatabase
-from .profiling.ncu_collector import run_ncu_profile
-from .profiling.nsys_collector import run_nsys_profile
 from .sensitivity.stress_kernels import StressKernels
-from .sensitivity.sensitivity_collector import collect_sensitivity
+
 
 def get_vllm_runner_path() -> str:
     return str(Path(__file__).parent / "vllm_runner.py")
 
 
-def run_ncu_stage(db: MLWDDatabase, config: ExperimentConfig,
-                  config_id: int, model: str, quant: str, tp: int):
-    """Stage 1: Nsight Compute 采集 CI, L2, IPC。"""
-    vllm_runner = get_vllm_runner_path()
-
-    for b in config.batch_sizes:
-        for s in config.seq_lengths:
-            for phase in config.phases:
-                if db.is_collected(config_id, b, s, phase, "ncu"):
-                    print(f"  [NCU] Skip (already collected): b={b}, s={s}, {phase}")
-                    continue
-
-                print(f"\n  [NCU] Collecting: b={b}, s={s}, {phase}")
-                ncu_result = run_ncu_profile(
-                    model=model, quantization=quant, tp_degree=tp,
-                    batch_size=b, seq_len=s, phase=phase,
-                    vllm_runner_path=vllm_runner,
-                    launch_count=config.ncu_num_runs,
-                )
-
-                profile = OperatorProfile(
-                    config_id=config_id, batch_size=b, seq_len=s, phase=phase,
-                    ci_attn=ncu_result.ci_attn, ci_ffn=ncu_result.ci_ffn,
-                    l2_attn=ncu_result.l2_attn, l2_ffn=ncu_result.l2_ffn,
-                    ipc=ncu_result.ipc,
-                )
-                db.upsert_profile(profile)
+def _make_key(model, quant, tp, b, s, phase):
+    """生成实验点的唯一 key。"""
+    model_short = model.replace("/", "_")
+    return f"{model_short}_{quant}_tp{tp}_b{b}_s{s}_{phase}"
 
 
-def run_nsys_stage(db: MLWDDatabase, config: ExperimentConfig,
-                   config_id: int, model: str, quant: str, tp: int):
-    """Stage 2: Nsight Systems 采集执行模式特征。"""
-    vllm_runner = get_vllm_runner_path()
-
-    for b in config.batch_sizes:
-        for s in config.seq_lengths:
-            for phase in config.phases:
-                if db.is_collected(config_id, b, s, phase, "nsys"):
-                    print(f"  [NSYS] Skip (already collected): b={b}, s={s}, {phase}")
-                    continue
-
-                print(f"\n  [NSYS] Collecting: b={b}, s={s}, {phase}")
-                nsys_result = run_nsys_profile(
-                    model=model, quantization=quant, tp_degree=tp,
-                    batch_size=b, seq_len=s, phase=phase,
-                    vllm_runner_path=vllm_runner,
-                )
-
-                profile = OperatorProfile(
-                    config_id=config_id, batch_size=b, seq_len=s, phase=phase,
-                    t_attn=nsys_result.t_attn, t_ffn=nsys_result.t_ffn,
-                    g_launch=nsys_result.g_launch,
-                    r_attn=nsys_result.r_attn, r_ffn=nsys_result.r_ffn,
-                    f_switch=nsys_result.f_switch,
-                    t_attn_std=nsys_result.t_attn_std, t_ffn_std=nsys_result.t_ffn_std,
-                )
-                db.upsert_profile(profile)
+def _load_results(output_dir: str) -> dict:
+    """加载已有的采集结果。"""
+    results_file = os.path.join(output_dir, "mlwd_results.json")
+    if os.path.exists(results_file):
+        with open(results_file, "r") as f:
+            return json.load(f)
+    return {}
 
 
-def run_sensitivity_stage(db: MLWDDatabase, config: ExperimentConfig,
-                          config_id: int, model: str, quant: str, tp: int,
-                          shared_lib_path: str):
-    """Stage 3: 四维干扰敏感度采集。"""
+def _save_results(output_dir: str, results: dict):
+    """保存采集结果到 JSON。"""
+    results_file = os.path.join(output_dir, "mlwd_results.json")
+    with open(results_file, "w") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+
+def _update_point(output_dir: str, key: str, updates: dict):
+    """更新单个实验点的部分字段并立即写入。"""
+    results = _load_results(output_dir)
+    if key not in results:
+        results[key] = {}
+    results[key].update(updates)
+    _save_results(output_dir, results)
+
+
+def run_sensitivity_stage(config: ExperimentConfig, model: str, quant: str,
+                          tp: int, shared_lib_path: str, output_dir: str):
+    """Stage 3: 四维干扰敏感度采集，每个维度独立写入。"""
     stress_kernels = StressKernels(shared_lib_path)
 
-    # 需要在进程内加载 vLLM 模型
-    from .vllm_runner import load_vllm_model, create_synthetic_prompts, run_prefill, run_decode
+    from .vllm_runner import load_vllm_model, create_synthetic_prompts
 
     print(f"  [Sensitivity] Loading model: {model}...")
     llm, tokenizer = load_vllm_model(model, quant, tp)
@@ -107,40 +74,126 @@ def run_sensitivity_stage(db: MLWDDatabase, config: ExperimentConfig,
 
     from vllm import SamplingParams
 
+    results = _load_results(output_dir)
+    stress_config = config.stress
+
+    dims = [
+        ("sigma_bs", lambda: stress_kernels.run_bs_stress(
+            stress_config.bs_num_tb, stress_config.bs_num_threads,
+            stress_config.bs_num_itrs, 1)),
+        ("sigma_cu", lambda: stress_kernels.run_cu_stress(
+            stress_config.cu_num_tb, stress_config.cu_num_threads,
+            stress_config.cu_num_itrs, 1)),
+        ("sigma_l2", lambda: stress_kernels.run_l2_stress(
+            stress_config.l2_num_tb, stress_config.l2_num_threads,
+            stress_config.l2_num_itrs, stress_config.l2_num_bytes, 1)),
+        ("sigma_bw", lambda: stress_kernels.run_bw_stress(
+            stress_config.bw_num_tb, stress_config.bw_num_threads,
+            stress_config.bw_num_itrs, stress_config.bw_num_bytes, 1)),
+    ]
+
     for b in config.batch_sizes:
         for s in config.seq_lengths:
             for phase in config.phases:
-                if db.is_collected(config_id, b, s, phase, "sensitivity"):
-                    print(f"  [Sensitivity] Skip: b={b}, s={s}, {phase}")
-                    continue
+                key = _make_key(model, quant, tp, b, s, phase)
+                existing = results.get(key, {})
 
-                print(f"\n  [Sensitivity] Collecting: b={b}, s={s}, {phase}")
+                print(f"\n  [Sensitivity] === b={b}, s={s}, {phase} ===")
 
-                # 构造推理函数
+                # 构造推理函数（用默认参数捕获当前值，避免闭包陷阱）
                 if phase == "prefill":
                     prompts = create_synthetic_prompts(tokenizer, s, b)
                     sp = SamplingParams(max_tokens=1, temperature=0)
-                    run_fn = lambda: llm.generate(prompts, sp)
+                    def run_fn(_p=prompts, _sp=sp):
+                        return llm.generate(_p, _sp)
                 else:
                     short_prompts = ["The"] * b
                     sp = SamplingParams(max_tokens=s, temperature=0)
-                    run_fn = lambda: llm.generate(short_prompts, sp)
+                    def run_fn(_p=short_prompts, _sp=sp):
+                        return llm.generate(_p, _sp)
 
-                sens_result = collect_sensitivity(
-                    run_inference_fn=run_fn,
-                    stress_kernels=stress_kernels,
-                    stress_config=config.stress,
-                    num_runs=config.sensitivity_num_runs,
-                    warmup_runs=config.warmup_runs,
-                )
+                # 测量基线
+                if "baseline_ms" not in existing:
+                    print(f"  [Sensitivity] Measuring baseline...")
+                    # warmup
+                    for _ in range(config.warmup_runs):
+                        run_fn()
 
-                profile = OperatorProfile(
-                    config_id=config_id, batch_size=b, seq_len=s, phase=phase,
-                    sigma_bs=sens_result.sigma_bs, sigma_cu=sens_result.sigma_cu,
-                    sigma_l2=sens_result.sigma_l2, sigma_bw=sens_result.sigma_bw,
-                    baseline_latency_ms=sens_result.baseline_latency_ms,
-                )
-                db.upsert_profile(profile)
+                    latencies = []
+                    for i in range(config.sensitivity_num_runs):
+                        t0 = time.perf_counter()
+                        run_fn()
+                        lat = (time.perf_counter() - t0) * 1000.0
+                        latencies.append(lat)
+                        print(f"    baseline run {i}: {lat:.2f} ms")
+
+                    latencies.sort()
+                    mid = len(latencies) // 2
+                    baseline = latencies[mid] if len(latencies) % 2 == 1 else (latencies[mid-1] + latencies[mid]) / 2
+                    print(f"  [Sensitivity] Baseline median: {baseline:.2f} ms")
+
+                    _update_point(output_dir, key, {
+                        "model": model, "quantization": quant, "tp": tp,
+                        "batch_size": b, "seq_len": s, "phase": phase,
+                        "baseline_ms": round(baseline, 4),
+                        "baseline_all_ms": [round(l, 4) for l in latencies],
+                    })
+                else:
+                    baseline = existing["baseline_ms"]
+                    print(f"  [Sensitivity] Baseline (cached): {baseline:.2f} ms")
+
+                # 逐维度测量
+                for dim_name, stress_fn in dims:
+                    if dim_name in existing and existing[dim_name] is not None:
+                        print(f"  [Sensitivity] Skip {dim_name} (already collected: {existing[dim_name]:.4f})")
+                        continue
+
+                    print(f"  [Sensitivity] Measuring {dim_name}...")
+
+                    try:
+                        stop_event = threading.Event()
+                        def _bg_stress(_fn=stress_fn, _stop=stop_event):
+                            while not _stop.is_set():
+                                _fn()
+
+                        stress_thread = threading.Thread(target=_bg_stress, daemon=True)
+                        stress_thread.start()
+
+                        # warmup under stress
+                        for _ in range(config.warmup_runs):
+                            run_fn()
+
+                        # measure
+                        latencies = []
+                        for i in range(config.sensitivity_num_runs):
+                            t0 = time.perf_counter()
+                            run_fn()
+                            lat = (time.perf_counter() - t0) * 1000.0
+                            latencies.append(lat)
+                            print(f"    {dim_name} run {i}: {lat:.2f} ms")
+
+                        stop_event.set()
+                        stress_thread.join(timeout=30)
+
+                        latencies.sort()
+                        mid = len(latencies) // 2
+                        stressed = latencies[mid] if len(latencies) % 2 == 1 else (latencies[mid-1] + latencies[mid]) / 2
+
+                        sigma = max((stressed - baseline) / baseline, 0.0)
+                        print(f"  [Sensitivity] {dim_name} = {sigma:.4f} (baseline={baseline:.2f}ms, stressed={stressed:.2f}ms)")
+
+                        _update_point(output_dir, key, {
+                            dim_name: round(sigma, 6),
+                            f"{dim_name}_stressed_ms": round(stressed, 4),
+                            f"{dim_name}_all_ms": [round(l, 4) for l in latencies],
+                        })
+                        # 刷新 existing
+                        existing = _load_results(output_dir).get(key, {})
+
+                    except Exception as e:
+                        print(f"  [Sensitivity] {dim_name} FAILED: {e}")
+                        _update_point(output_dir, key, {dim_name: None, f"{dim_name}_error": str(e)})
+                        existing = _load_results(output_dir).get(key, {})
 
 
 def main():
@@ -153,14 +206,13 @@ def main():
     parser.add_argument("--seq_lengths", type=int, nargs="+", default=None)
     parser.add_argument("--stage", type=str, nargs="+",
                         choices=["ncu", "nsys", "sensitivity", "all"],
-                        default=["all"],
-                        help="要运行的采集阶段")
-    parser.add_argument("--db_path", type=str, default="mlwd_data.db")
+                        default=["all"])
+    parser.add_argument("--output_dir", type=str, default="mlwd_output",
+                        help="输出目录")
     parser.add_argument("--shared_lib", type=str,
                         default=str(Path(__file__).parent.parent / "build" / "mm_pytorch" / "libpython_interface.so"))
     args = parser.parse_args()
 
-    # 构建实验配置
     config = ExperimentConfig()
     if args.model:
         config.models = args.model
@@ -174,49 +226,38 @@ def main():
     stages = set(args.stage)
     run_all = "all" in stages
 
+    os.makedirs(args.output_dir, exist_ok=True)
+
     print(f"MLWD Offline Collection")
     print(f"  Models: {config.models}")
-    print(f"  Quantizations: {config.quantizations}")
-    print(f"  TP degrees: {config.tp_degrees}")
     print(f"  Batch sizes: {config.batch_sizes}")
     print(f"  Seq lengths: {config.seq_lengths}")
     print(f"  Stages: {stages}")
-    print(f"  Total experiment points: {config.total_points()}")
-    print(f"  DB: {args.db_path}")
+    print(f"  Total points: {config.total_points()}")
+    print(f"  Output: {args.output_dir}/")
     print()
 
-    db = MLWDDatabase(args.db_path)
+    for model, framework, quant, tp in config.iter_deployment_configs():
+        print(f"{'='*60}")
+        print(f"Config: {model} | {quant} | TP={tp}")
+        print(f"{'='*60}")
 
-    try:
-        for model, framework, quant, tp in config.iter_deployment_configs():
-            dep_cfg = DeploymentConfig(
-                model=model, framework=framework,
-                quantization=quant, tp_degree=tp,
-            )
-            config_id = db.upsert_config(dep_cfg)
-            print(f"{'='*60}")
-            print(f"Config: {model} | {quant} | TP={tp} (config_id={config_id})")
-            print(f"{'='*60}")
+        if run_all or "sensitivity" in stages:
+            print("\n--- Interference Sensitivity ---")
+            run_sensitivity_stage(config, model, quant, tp,
+                                  args.shared_lib, args.output_dir)
 
-            if run_all or "ncu" in stages:
-                print("\n--- Stage 1: Nsight Compute ---")
-                run_ncu_stage(db, config, config_id, model, quant, tp)
+        if run_all or "ncu" in stages:
+            print("\n--- Nsight Compute (ncu) ---")
+            print("  [NCU] TODO: ncu stage not yet integrated with JSON output")
 
-            if run_all or "nsys" in stages:
-                print("\n--- Stage 2: Nsight Systems ---")
-                run_nsys_stage(db, config, config_id, model, quant, tp)
+        if run_all or "nsys" in stages:
+            print("\n--- Nsight Systems (nsys) ---")
+            print("  [NSYS] TODO: nsys stage not yet integrated with JSON output")
 
-            if run_all or "sensitivity" in stages:
-                print("\n--- Stage 3: Interference Sensitivity ---")
-                run_sensitivity_stage(db, config, config_id, model, quant, tp,
-                                      args.shared_lib)
-
-        # 导出汇总
-        all_data = db.export_all()
-        print(f"\nCollection complete. {len(all_data)} records in database.")
-
-    finally:
-        db.close()
+    # 打印汇总
+    results = _load_results(args.output_dir)
+    print(f"\nCollection complete. {len(results)} experiment points saved to {args.output_dir}/mlwd_results.json")
 
 
 if __name__ == "__main__":
