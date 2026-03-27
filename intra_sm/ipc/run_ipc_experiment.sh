@@ -1,16 +1,15 @@
 #!/bin/bash
 
-# NOTE: current arguments are tailored to the H100
-# adapt them based on the GPU you are running on
+# V100: 80 SMs, 4 warp schedulers/SM, max 2048 threads/SM
 # don't forget to set the BUILD_DIR env variable
 
-threads_per_tb_copy=1024
-threads_per_tb_comp=128 # TODO: update based on scenario you are running
-num_itrs_comp=20000000 # TODO: update to match isolated copy runtime
-num_itrs_copy=40 # TODO: update to match isolated compute runtime
-num_bytes=4294967296 # 4 GB, update if necessary to avoid OOM errors
+threads_per_tb_copy=1024  # max_threads_per_sm / 2 = 2048 / 2
+threads_per_tb_comp=128   # 4 warps (1 per scheduler subpartition)
+num_itrs_comp=20000000    # adjust to match isolated copy runtime
+num_itrs_copy=40          # adjust to match isolated compute runtime
+num_bytes=2147483648      # 2 GB (conservative for V100 16GB/32GB)
 
-ILP=4 # TODO: update compute ilp level based on scenario you are running
+ILP=4
 
 # Measure the latency of a single copy kernel
 $BUILD_DIR/ipc 1 0 $threads_per_tb_copy $threads_per_tb_comp $num_itrs_copy $num_itrs_comp $num_bytes
