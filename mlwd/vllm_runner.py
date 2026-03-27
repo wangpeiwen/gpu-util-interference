@@ -99,6 +99,9 @@ def run_decode(llm, tokenizer, batch_size: int, seq_len: int,
 def load_vllm_model(model_name: str, quantization: str = "fp16",
                      tp_degree: int = 1, gpu_memory_utilization: float = 0.9):
     """加载 vLLM 模型。"""
+    import os
+    os.environ["VLLM_USE_V1"] = "0"
+
     from vllm import LLM
     from transformers import AutoTokenizer
 
@@ -112,6 +115,7 @@ def load_vllm_model(model_name: str, quantization: str = "fp16",
         "tensor_parallel_size": tp_degree,
         "gpu_memory_utilization": gpu_memory_utilization,
         "trust_remote_code": True,
+        "enforce_eager": True,  # 禁用 CUDA graph，减少显存占用
     }
     if quantization == "int8":
         kwargs["quantization"] = "squeezellm"
@@ -133,12 +137,14 @@ def main():
     parser.add_argument("--phase", type=str, required=True, choices=["prefill", "decode"])
     parser.add_argument("--num_runs", type=int, default=5)
     parser.add_argument("--warmup_runs", type=int, default=2)
+    parser.add_argument("--gpu_mem", type=float, default=0.9,
+                        help="vLLM gpu_memory_utilization (降低此值以适应显存不足)")
     parser.add_argument("--output_json", type=str, default=None,
                         help="输出结果到 JSON 文件")
     args = parser.parse_args()
 
     print(f"Loading model: {args.model} ({args.quantization}, TP={args.tp})...")
-    llm, tokenizer = load_vllm_model(args.model, args.quantization, args.tp)
+    llm, tokenizer = load_vllm_model(args.model, args.quantization, args.tp, args.gpu_mem)
     print("Model loaded.")
 
     if args.phase == "prefill":

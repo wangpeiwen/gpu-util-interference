@@ -7,10 +7,28 @@ Nsight Systems 采集器。
 
 import subprocess
 import os
+import shutil
 import sys
 from typing import Optional
 
 from .nsys_parser import parse_nsys_sqlite, NSysResult
+
+
+def _find_nsys() -> str:
+    """查找 nsys 可执行文件路径。"""
+    # 优先用 PATH 中的
+    nsys = shutil.which("nsys")
+    if nsys:
+        return nsys
+    # 常见安装位置
+    candidates = [
+        "/opt/nvidia/nsight-compute/2025.1.1/host/target-linux-x64/nsys",
+        "/opt/nvidia/nsight-systems/2025.1.1/bin/nsys",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    raise FileNotFoundError("nsys not found. Install Nsight Systems or set PATH.")
 
 
 def run_nsys_profile(model: str, quantization: str, tp_degree: int,
@@ -30,9 +48,15 @@ def run_nsys_profile(model: str, quantization: str, tp_degree: int,
     rep_path = os.path.join(output_dir, base_name)
     sqlite_path = rep_path + ".sqlite"
 
+    # 强制 vLLM 使用单进程 V0 引擎
+    env = os.environ.copy()
+    env["VLLM_USE_V1"] = "0"
+
+    nsys_bin = _find_nsys()
+
     # Step 1: nsys profile
     profile_cmd = [
-        "nsys", "profile",
+        nsys_bin, "profile",
         "-o", rep_path,
         "--force-overwrite", "true",
         "--trace", "cuda,nvtx",
@@ -50,11 +74,14 @@ def run_nsys_profile(model: str, quantization: str, tp_degree: int,
     ]
 
     print(f"[NSYS] Profiling: {base_name}...")
-    result = subprocess.run(profile_cmd, capture_output=True, text=True, timeout=1800)
+    result = subprocess.run(profile_cmd, capture_output=True, text=True, timeout=3600, env=env)
 
     if result.returncode != 0:
-        print(f"[NSYS] Profile error (rc={result.returncode}): {result.stderr[:500]}")
-        return NSysResult()
+        # nsys 的 stderr 可能包含 FutureWarning，检查 .nsys-rep 是否已生成
+        rep_file = rep_path + ".nsys-rep"
+        if not os.path.exists(rep_file):
+            print(f"[NSYS] Profile error (rc={result.returncode}):\n{result.stderr[-1000:]}")
+            return NSysResult()
 
     # nsys 可能自动添加后缀
     rep_file = rep_path + ".nsys-rep"
@@ -71,7 +98,7 @@ def run_nsys_profile(model: str, quantization: str, tp_degree: int,
 
     # Step 2: nsys export to SQLite
     export_cmd = [
-        "nsys", "export",
+        nsys_bin, "export",
         "--type", "sqlite",
         "--output", sqlite_path,
         "--force-overwrite", "true",
