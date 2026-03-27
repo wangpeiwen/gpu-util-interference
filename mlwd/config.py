@@ -46,10 +46,11 @@ class StressKernelConfig:
     l2_num_itrs: int = 10000
 
     # Memory Bandwidth 压力核: copy_kernel + 大工作集
+    # 注意：工作集需远大于 L2 (6MB) 以绕过缓存，但不能超过剩余显存
     bw_num_tb: int = 80
     bw_num_threads: int = 1024
-    bw_num_bytes: int = 2 * 1024 * 1024 * 1024  # 2 GB
-    bw_num_itrs: int = 50
+    bw_num_bytes: int = 256 * 1024 * 1024  # 256 MB (远大于 L2，但不会 OOM)
+    bw_num_itrs: int = 200
 
 
 @dataclass
