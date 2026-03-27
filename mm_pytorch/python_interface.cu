@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <vector>
 #include <cuda_runtime.h>
+#include "kernels.cuh"
 
 using namespace std;
 
@@ -109,4 +110,131 @@ extern "C" void run_fp32_fma_kernel(int num_tb, int num_threads_per_tb, long lon
     free_compute_memory<float>(&a, &b, &c, &d_a, &d_b, &d_c);
 
     printf("FP32 Kernel execution completed!\n");
+}
+
+// ── Block Scheduler 压力核 ──
+// 使用 sleep_kernel 高频 launch 占满 Block Scheduler 队列
+extern "C" void run_tb_scheduler_stress(int num_tb, int num_threads_per_tb, long long num_itrs, int num_runs)
+{
+    cudaStream_t stream;
+    CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+
+    vector<cudaEvent_t> start_events(num_runs);
+    vector<cudaEvent_t> stop_events(num_runs);
+    for (int i = 0; i < num_runs; i++)
+    {
+        CUDACHECK(cudaEventCreate(&start_events[i]));
+        CUDACHECK(cudaEventCreate(&stop_events[i]));
+    }
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        CUDACHECK(cudaEventRecord(start_events[i], stream));
+        sleep_kernel<<<num_tb, num_threads_per_tb, 0, stream>>>(num_itrs);
+        CUDACHECK(cudaEventRecord(stop_events[i], stream));
+    }
+
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        float latency;
+        CUDACHECK(cudaEventElapsedTime(&latency, start_events[i], stop_events[i]));
+        printf("[BS Stress] Run %d: Latency: %f ms\n", i, latency);
+        CUDACHECK(cudaEventDestroy(start_events[i]));
+        CUDACHECK(cudaEventDestroy(stop_events[i]));
+    }
+
+    CUDACHECK(cudaStreamDestroy(stream));
+    printf("Block Scheduler stress kernel completed!\n");
+}
+
+// ── L2 Cache 压力核 ──
+// 使用 copy_kernel + L2 大小工作集制造 cache thrashing
+extern "C" void run_l2_cache_stress(int num_tb, int num_threads_per_tb, long long num_itrs, long long num_bytes, int num_runs)
+{
+    long long num_floats = num_bytes / sizeof(float);
+    float *d_in, *d_out;
+    CUDACHECK(cudaMalloc(&d_in, num_bytes));
+    CUDACHECK(cudaMalloc(&d_out, num_bytes));
+    CUDACHECK(cudaMemset(d_in, 0, num_bytes));
+
+    cudaStream_t stream;
+    CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+
+    vector<cudaEvent_t> start_events(num_runs);
+    vector<cudaEvent_t> stop_events(num_runs);
+    for (int i = 0; i < num_runs; i++)
+    {
+        CUDACHECK(cudaEventCreate(&start_events[i]));
+        CUDACHECK(cudaEventCreate(&stop_events[i]));
+    }
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        CUDACHECK(cudaEventRecord(start_events[i], stream));
+        copy_kernel<<<num_tb, num_threads_per_tb, 0, stream>>>(d_in, d_out, num_floats, num_itrs);
+        CUDACHECK(cudaEventRecord(stop_events[i], stream));
+    }
+
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        float latency;
+        CUDACHECK(cudaEventElapsedTime(&latency, start_events[i], stop_events[i]));
+        printf("[L2 Stress] Run %d: Latency: %f ms\n", i, latency);
+        CUDACHECK(cudaEventDestroy(start_events[i]));
+        CUDACHECK(cudaEventDestroy(stop_events[i]));
+    }
+
+    CUDACHECK(cudaStreamDestroy(stream));
+    CUDACHECK(cudaFree(d_in));
+    CUDACHECK(cudaFree(d_out));
+    printf("L2 Cache stress kernel completed!\n");
+}
+
+// ── Memory Bandwidth 压力核 ──
+// 使用 copy_kernel + 大工作集占满显存带宽
+extern "C" void run_mem_bw_stress(int num_tb, int num_threads_per_tb, long long num_itrs, long long num_bytes, int num_runs)
+{
+    long long num_floats = num_bytes / sizeof(float);
+    float *d_in, *d_out;
+    CUDACHECK(cudaMalloc(&d_in, num_bytes));
+    CUDACHECK(cudaMalloc(&d_out, num_bytes));
+    CUDACHECK(cudaMemset(d_in, 0, num_bytes));
+
+    cudaStream_t stream;
+    CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+
+    vector<cudaEvent_t> start_events(num_runs);
+    vector<cudaEvent_t> stop_events(num_runs);
+    for (int i = 0; i < num_runs; i++)
+    {
+        CUDACHECK(cudaEventCreate(&start_events[i]));
+        CUDACHECK(cudaEventCreate(&stop_events[i]));
+    }
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        CUDACHECK(cudaEventRecord(start_events[i], stream));
+        copy_kernel<<<num_tb, num_threads_per_tb, 0, stream>>>(d_in, d_out, num_floats, num_itrs);
+        CUDACHECK(cudaEventRecord(stop_events[i], stream));
+    }
+
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    for (int i = 0; i < num_runs; i++)
+    {
+        float latency;
+        CUDACHECK(cudaEventElapsedTime(&latency, start_events[i], stop_events[i]));
+        printf("[BW Stress] Run %d: Latency: %f ms\n", i, latency);
+        CUDACHECK(cudaEventDestroy(start_events[i]));
+        CUDACHECK(cudaEventDestroy(stop_events[i]));
+    }
+
+    CUDACHECK(cudaStreamDestroy(stream));
+    CUDACHECK(cudaFree(d_in));
+    CUDACHECK(cudaFree(d_out));
+    printf("Memory Bandwidth stress kernel completed!\n");
 }
