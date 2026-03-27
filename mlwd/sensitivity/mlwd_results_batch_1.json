@@ -1,0 +1,314 @@
+{
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s32_prefill": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 32,
+    "phase": "prefill",
+    "baseline_ms": 32.4942,
+    "baseline_all_ms": [
+      30.0976,
+      31.5798,
+      32.4942,
+      33.3536,
+      34.1963
+    ],
+    "sigma_bs": 2.015691,
+    "sigma_bs_stressed_ms": 97.9924,
+    "sigma_bs_all_ms": [
+      34.3388,
+      88.1507,
+      97.9924,
+      111.5766,
+      151.3644
+    ],
+    "sigma_cu": 2.081209,
+    "sigma_cu_stressed_ms": 100.1214,
+    "sigma_cu_all_ms": [
+      98.2706,
+      98.9974,
+      100.1214,
+      102.3989,
+      106.2605
+    ],
+    "sigma_l2": 2.080255,
+    "sigma_l2_stressed_ms": 100.0904,
+    "sigma_l2_all_ms": [
+      99.7403,
+      100.0287,
+      100.0904,
+      100.1775,
+      100.2975
+    ],
+    "sigma_bw": 2.053261,
+    "sigma_bw_stressed_ms": 99.2132,
+    "sigma_bw_all_ms": [
+      96.7865,
+      98.8142,
+      99.2132,
+      100.4862,
+      104.1739
+    ]
+  },
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s32_decode": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 32,
+    "phase": "decode",
+    "baseline_ms": 1014.1716,
+    "baseline_all_ms": [
+      998.4097,
+      1004.9323,
+      1014.1716,
+      1047.0672,
+      1050.5569
+    ],
+    "sigma_bs": 1.27605,
+    "sigma_bs_stressed_ms": 2308.305,
+    "sigma_bs_all_ms": [
+      2291.5274,
+      2294.4382,
+      2308.305,
+      2319.7317,
+      2456.7669
+    ],
+    "sigma_cu": 1.253307,
+    "sigma_cu_stressed_ms": 2285.2403,
+    "sigma_cu_all_ms": [
+      2238.6816,
+      2279.033,
+      2285.2403,
+      2300.5011,
+      2390.9989
+    ],
+    "sigma_l2": 1.281661,
+    "sigma_l2_stressed_ms": 2313.996,
+    "sigma_l2_all_ms": [
+      2286.3728,
+      2298.698,
+      2313.996,
+      2370.4742,
+      2396.7844
+    ],
+    "sigma_bw": 1.297478,
+    "sigma_bw_stressed_ms": 2330.0371,
+    "sigma_bw_all_ms": [
+      2299.4857,
+      2307.0064,
+      2330.0371,
+      2378.3539,
+      2398.9141
+    ]
+  },
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s64_prefill": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 64,
+    "phase": "prefill",
+    "baseline_ms": 34.2018,
+    "baseline_all_ms": [
+      31.4376,
+      32.2926,
+      34.2018,
+      36.3212,
+      36.5055
+    ],
+    "sigma_bs": 1.907158,
+    "sigma_bs_stressed_ms": 99.43,
+    "sigma_bs_all_ms": [
+      78.4354,
+      99.338,
+      99.43,
+      99.896,
+      100.4225
+    ],
+    "sigma_cu": 1.920117,
+    "sigma_cu_stressed_ms": 99.8732,
+    "sigma_cu_all_ms": [
+      98.9979,
+      99.4437,
+      99.8732,
+      100.2699,
+      104.1346
+    ],
+    "sigma_l2": 1.927762,
+    "sigma_l2_stressed_ms": 100.1347,
+    "sigma_l2_all_ms": [
+      97.9771,
+      98.8254,
+      100.1347,
+      101.6133,
+      101.6404
+    ],
+    "sigma_bw": 1.922846,
+    "sigma_bw_stressed_ms": 99.9666,
+    "sigma_bw_all_ms": [
+      94.2752,
+      99.4228,
+      99.9666,
+      100.8151,
+      105.2726
+    ]
+  },
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s64_decode": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 64,
+    "phase": "decode",
+    "baseline_ms": 2044.676,
+    "baseline_all_ms": [
+      2020.6407,
+      2041.9317,
+      2044.676,
+      2045.5549,
+      2054.8202
+    ],
+    "sigma_bs": 1.308005,
+    "sigma_bs_stressed_ms": 4719.1226,
+    "sigma_bs_all_ms": [
+      4695.6052,
+      4700.6767,
+      4719.1226,
+      4783.8958,
+      4882.6326
+    ],
+    "sigma_cu": 1.24234,
+    "sigma_cu_stressed_ms": 4584.8593,
+    "sigma_cu_all_ms": [
+      4523.3835,
+      4558.4037,
+      4584.8593,
+      4631.8048,
+      4683.2474
+    ],
+    "sigma_l2": 1.263627,
+    "sigma_l2_stressed_ms": 4628.3832,
+    "sigma_l2_all_ms": [
+      4590.5097,
+      4602.324,
+      4628.3832,
+      4674.3422,
+      4686.8643
+    ],
+    "sigma_bw": 1.297988,
+    "sigma_bw_stressed_ms": 4698.6416,
+    "sigma_bw_all_ms": [
+      4583.4031,
+      4666.3342,
+      4698.6416,
+      4720.8746,
+      4721.4634
+    ]
+  },
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s128_prefill": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 128,
+    "phase": "prefill",
+    "baseline_ms": 34.9721,
+    "baseline_all_ms": [
+      33.1884,
+      34.4871,
+      34.9721,
+      45.9913,
+      49.9622
+    ],
+    "sigma_bs": 1.862453,
+    "sigma_bs_stressed_ms": 100.1061,
+    "sigma_bs_all_ms": [
+      99.7801,
+      99.8852,
+      100.1061,
+      100.3584,
+      101.5282
+    ],
+    "sigma_cu": 1.8461,
+    "sigma_cu_stressed_ms": 99.5342,
+    "sigma_cu_all_ms": [
+      95.0744,
+      99.4092,
+      99.5342,
+      100.3288,
+      104.2755
+    ],
+    "sigma_l2": 1.861554,
+    "sigma_l2_stressed_ms": 100.0747,
+    "sigma_l2_all_ms": [
+      99.0872,
+      99.2258,
+      100.0747,
+      100.3943,
+      100.5642
+    ],
+    "sigma_bw": 1.855856,
+    "sigma_bw_stressed_ms": 99.8754,
+    "sigma_bw_all_ms": [
+      98.3985,
+      99.7468,
+      99.8754,
+      100.114,
+      101.8977
+    ]
+  },
+  "_data_Qwen_Qwen2.5-7B-Instruct_fp16_tp1_b1_s128_decode": {
+    "model": "/data/Qwen/Qwen2.5-7B-Instruct",
+    "quantization": "fp16",
+    "tp": 1,
+    "batch_size": 1,
+    "seq_len": 128,
+    "phase": "decode",
+    "baseline_ms": 4117.7383,
+    "baseline_all_ms": [
+      4044.1799,
+      4049.9521,
+      4117.7383,
+      4123.9433,
+      4140.9035
+    ],
+    "sigma_bs": 1.265663,
+    "sigma_bs_stressed_ms": 9329.4061,
+    "sigma_bs_all_ms": [
+      9295.5571,
+      9299.8579,
+      9329.4061,
+      9392.4708,
+      9486.5054
+    ],
+    "sigma_cu": 1.216642,
+    "sigma_cu_stressed_ms": 9127.5536,
+    "sigma_cu_all_ms": [
+      9076.963,
+      9093.6553,
+      9127.5536,
+      9127.5621,
+      9170.0237
+    ],
+    "sigma_l2": 1.274328,
+    "sigma_l2_stressed_ms": 9365.0867,
+    "sigma_l2_all_ms": [
+      9213.6323,
+      9355.9599,
+      9365.0867,
+      9440.6635,
+      9445.5327
+    ],
+    "sigma_bw": 1.254345,
+    "sigma_bw_stressed_ms": 9282.804,
+    "sigma_bw_all_ms": [
+      9128.378,
+      9217.6162,
+      9282.804,
+      9300.6186,
+      9384.9435
+    ]
+  }
+}
