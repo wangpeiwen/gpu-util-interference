@@ -1,18 +1,19 @@
 #!/bin/bash
 
-# NOTE: current arguments are tailored to the H100
-# adapt them based on the GPU you are running on
-# don't forget to set the BUILD_DIR env variable
+# V100: 80 SMs, max 2048 threads/SM, L2 = 6 MB, 16/32 GB HBM2
+# MPS 50% -> 40 SMs available per process
+# Each block: 1024 threads -> 1 block/SM (1024 < 2048)
+# Full wave = 40 blocks; loop 1~4 waves
 
-NUM_THREADS_PER_BLOCK=1024 # TODO: set to max_threads_per_sm / 2
+NUM_THREADS_PER_BLOCK=1024  # max_threads_per_sm / 2 = 2048 / 2
 NUM_ITRS=50
-NUM_BYTES=4294967296 # 4 GB, TODO: update based on your GPU memory
+NUM_BYTES=2147483648  # 2 GB (safe for 16 GB V100 with two processes)
 
 echo "------------------------------------"
 echo "Starting MPS"
 export CUDA_VISIBLE_DEVICES=0
-export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps # Select a location that’s accessible to the given $UID
-export CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log # Select a location that’s accessible to the given $UID
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps
+export CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log
 nvidia-cuda-mps-control -d
 
 function cleanup() {
@@ -21,11 +22,10 @@ function cleanup() {
     echo "MPS control daemon shut down."
 }
 
-# always shut down MPS control daemon
 trap "cleanup; exit" SIGINT
 
-# TODO: adjust the loop based on the number of SMs on your GPU
-for NUM_TB in {33..132..33}; do
+# V100: 40 available SMs with 50% MPS, step by full waves (40 blocks)
+for NUM_TB in 40 80 120 160; do
     # measuring latency of a single copy kernel on 50% of SMs
     CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=50 $BUILD_DIR/mem_bw 1 $NUM_TB $NUM_THREADS_PER_BLOCK $NUM_ITRS $NUM_BYTES
 
