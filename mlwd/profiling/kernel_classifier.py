@@ -20,12 +20,16 @@ ATTENTION_PATTERNS = [
     re.compile(r"flash_attn", re.IGNORECASE),
     re.compile(r"fmha", re.IGNORECASE),
     re.compile(r"paged_attention", re.IGNORECASE),
+    re.compile(r"unified_attention", re.IGNORECASE),
+    re.compile(r"kernel.*attention", re.IGNORECASE),
     re.compile(r"attention.*kernel", re.IGNORECASE),
     re.compile(r"cutlass.*attention", re.IGNORECASE),
     re.compile(r"multi_head_attention", re.IGNORECASE),
     re.compile(r"scaled_dot_product", re.IGNORECASE),
     re.compile(r"flash.*fwd", re.IGNORECASE),
     re.compile(r"flash.*bwd", re.IGNORECASE),
+    re.compile(r"reshape_and_cache", re.IGNORECASE),
+    re.compile(r"reduce_segments", re.IGNORECASE),
 ]
 
 FFN_PATTERNS = [
