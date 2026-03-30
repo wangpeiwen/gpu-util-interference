@@ -38,25 +38,26 @@ def main():
     parser.add_argument("--output", type=str, default="mlwd_output/mlwd_results_profiler.json")
     args = parser.parse_args()
 
-    os.environ["VLLM_USE_V1"] = "0"
-
-    from vllm import LLM, SamplingParams
-    from transformers import AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     print(f"Loading model: {args.model}...")
-    dtype_map = {"fp16": "float16", "bf16": "bfloat16", "fp32": "float32"}
-    llm = LLM(
-        model=args.model,
-        dtype=dtype_map.get(args.quantization, "float16"),
-        tensor_parallel_size=args.tp,
-        trust_remote_code=True,
-        enforce_eager=True,
-    )
+    dtype_map = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+    torch_dtype = dtype_map.get(args.quantization, torch.float16)
+
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model, torch_dtype=torch_dtype, device_map="cuda", trust_remote_code=True
+    )
+    model.eval()
     print("Model loaded.\n")
 
     # Global warmup
-    llm.generate(["Hello"], SamplingParams(max_tokens=1, temperature=0))
+    with torch.no_grad():
+        dummy = tokenizer("Hello", return_tensors="pt").to("cuda")
+        model.generate(**dummy, max_new_tokens=2, do_sample=False)
     torch.cuda.synchronize()
 
     results = {}
@@ -79,12 +80,13 @@ def main():
         base_text = "hello " * (s * 2)
         token_ids = tokenizer.encode(base_text)[:s]
         prompt = tokenizer.decode(token_ids)
-        prompts = [prompt] * b
-        sp = SamplingParams(max_tokens=args.max_tokens, temperature=0)
+        # 构造 batch
+        inputs = tokenizer([prompt] * b, return_tensors="pt", padding=True).to("cuda")
 
         # Warmup
-        for _ in range(args.warmup_runs):
-            llm.generate(prompts, sp)
+        with torch.no_grad():
+            for _ in range(args.warmup_runs):
+                model.generate(**inputs, max_new_tokens=args.max_tokens, do_sample=False)
         torch.cuda.synchronize()
 
         # Profile
@@ -101,7 +103,8 @@ def main():
                 profile_memory=True,
                 record_shapes=True,
             ) as prof:
-                llm.generate(prompts, sp)
+                with torch.no_grad():
+                    model.generate(**inputs, max_new_tokens=args.max_tokens, do_sample=False)
                 torch.cuda.synchronize()
 
             # 提取 kernel 级事件
