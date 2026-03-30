@@ -12,30 +12,31 @@
 
 \subsection{同 SM 利用率下的干扰差异分析}
 
-研究指出，GPU 内部共享资源可进一步分解为四个竞争维度：线程块调度器、计算单元、L1/L2 缓存和显存带宽\upcite{elvinger2025gpuutildeeper}。对于不同的内核，即使 SM 利用率接近，它们在上述四个维度上的资源占用分布也可能明显不同。一类内核可能主要占用计算单元而缓存压力较小；另一类内核对计算需求不高，但会频繁地竞争 L2 缓存和显存带宽。当这两类任务分别与同一任务共置时，产生的干扰情况并不相同。
+研究指出，GPU 内部共享资源可以进一步分解为四个竞争维度：线程块调度器、计算单元、L1/L2 缓存和显存带宽\upcite{elvinger2025gpuutildeeper}。对于不同的内核，即使 SM 利用率接近，它们在上述四个维度上的资源占用分布也可能明显不同。一类内核可能主要占用计算单元而缓存压力较小；另一类内核对于计算的需求不高，但会频繁地竞争 L2 缓存和显存带宽。当这两类任务分别与同一任务共置时，产生的干扰情况并不相同。
 
 \begin{figure}[htbp]
     \centering
+
     \begin{subfigure}[b]{0.32\linewidth}
         \centering
-        \includegraphics[width=\linewidth]{北航硕博士学位论文 LaTeX 4.1.0/pic/线程块调度器饱和导致的共置 Kernel 串行化.png}
-        \caption{线程块调度器饱和}
-        \label{fig:block-scheduler}
+        \includegraphics[width=\linewidth]{北航硕博士学位论文 LaTeX 4.1.0/pic/L1 缓存容量溢出引发的共置干扰激增.png}
+        \caption{L1 缓存容量压力}
+        \label{fig:l1-cache-overflow}
     \end{subfigure}
     \hfill
     \begin{subfigure}[b]{0.32\linewidth}
         \centering
         \includegraphics[width=\linewidth]{北航硕博士学位论文 LaTeX 4.1.0/pic/L2 缓存容量压力下的共置干扰加剧.png}
-        \caption{L2 缓存压力}
+        \caption{L2 缓存容量压力}
         \label{fig:l2-cache}
     \end{subfigure}
-    \hfill
     \begin{subfigure}[b]{0.32\linewidth}
         \centering
         \includegraphics[width=\linewidth]{北航硕博士学位论文 LaTeX 4.1.0/pic/显存带宽竞争下的共置 Kernel 性能退化.png}
         \caption{显存带宽竞争}
         \label{fig:memory-bandwidth}
     \end{subfigure}
+
     \caption{不同硬件资源瓶颈下的共置 Kernel 干扰现象}
     \label{fig:colocation-interference}
 \end{figure}
@@ -54,9 +55,9 @@ LLM 中注意力机制的实现方式直接影响了 Decode 阶段的 GPU 资源
 
 综合上述分析，准确的共置干扰建模需要同时刻画两个相互独立的维度。第一个维度是“资源竞争强度”（aggressor strength），即任务在各资源竞争维度上的实际消耗程度，也就是该任务作为干扰源时对共置任务施加的压力。该维度可由算子级计算强度（CI）和 L2 缓存命中率等指标描述。例如，CI 较高的任务通常在计算单元维度上施加更强压力，而 L2 命中率较低的任务则往往在显存带宽维度上施加更强压力。第二个维度是“干扰敏感度”（victim sensitivity），即任务在各资源竞争维度上对外部干扰的脆弱程度，可由四维干扰敏感度向量 $(\sigma_{\text{bs}}, \sigma_{\mathrm{cu}}, \sigma_{\text{l2}}, \sigma_{\text{bw}})$ 表示。
 
-如果仅考虑资源竞争强度而忽略干扰敏感度，估算方法将无法区分"两项高 CI 任务共置"和"一项高 CI 任务与一项对计算单元竞争不敏感的任务共置"这两种情形。尽管前者和后者的资源竞争强度可能相近，但由于受到干扰的任务负载干扰敏感性不同，实际干扰程度并不相同。反之，若只考虑干扰敏感度而忽略资源竞争强度，也无法判断干扰源实际造成的资源压力。因此，干扰系数的估算应同时基于这两个维度的特征。
+如果仅考虑资源竞争强度而忽略干扰敏感度，估算方法将无法区分"两项高 CI 任务共置"和"一项高 CI 任务与一项对计算单元竞争不敏感的任务共置"这两种情形。尽管前者和后者的资源竞争强度可能相近，但由于受到干扰的任务负载干扰敏感性不同，实际干扰程度并不相同。反之，如果只考虑干扰敏感度而忽略了资源竞争强度，也无法判断干扰源实际造成的资源压力。因此，干扰系数的估算应同时基于这两个维度的特征。
 
-此外，干扰估算还需要纳入请求的实时动态状态，包括当前阶段、批大小、序列长度以及未来行为预测，因为算子画像的实际取值会随这些动态参数变化。MLWD 的两层结构正是基于这一需求设计：第一层编码资源竞争强度和干扰敏感度等算子级特征，第二层编码请求的动态状态。
+此外，干扰估算还需要考虑请求的实时动态状态，包括当前阶段、批大小、序列长度以及未来行为的预测，因为算子画像的实际取值会随着这些动态参数变化。MLWD 的两层结构正是基于这一需求设计：第一层编码资源竞争强度和干扰敏感度等算子级特征，第二层编码请求的动态状态。
 
 \section{MLWD 向量的两层结构设计}
 
@@ -111,9 +112,26 @@ FFN 时间占比 & $r_{\mathrm{ffn}}$ & Nsight Systems & $r_{\mathrm{ffn}}=\bar{
 
 干扰敏感度特征组由四维干扰敏感度向量 $(\sigma_{\text{bs}}, \sigma_{\mathrm{cu}}, \sigma_{\text{l2}}, \sigma_{\text{bw}})$ 构成，分别量化工作负载对线程块调度器（Block Scheduler）、计算单元（Compute Units）、L2 缓存和显存带宽四个竞争维度的敏感程度。其采集方式为：在离线 Profiling 过程中，对每个 $(\text{model}, \text{framework}, \text{config}, b, s)$ 组合分别注入四类仅占用单一资源维度的合成干扰 Kernel，并测量目标任务在对应压力下的性能退化比例，作为敏感度取值。通过这一向量，MLWD 不仅描述任务的资源消耗情况，也刻画了任务对资源竞争的脆弱程度，从而为干扰预测提供重要的判别信息。
 
-执行模式特征组用于补充描述任务在时间维度上的执行行为。已有研究表明，共置干扰不仅与单个 Kernel 的资源消耗有关，也与多个 Kernel 的执行顺序及时间重叠模式密切相关。本组包括以下特征：Kernel Launch 间隔 $\bar{g}_{\text{launch}}$ 用于反映框架调度粒度和调度效率；Attention 时间占比 $r_{\mathrm{attn}}$ 和 FFN 时间占比 $r_{\mathrm{ffn}}$ 描述两类主要算子的时间分布；计算-访存交替频率 $f_{\text{switch}}$ 反映 compute-bound Kernel 和 memory-bound Kernel 在单位时间内的切换次数，有助于判断共置任务在时间上是否容易发生重叠；平均 IPC $\overline{\text{IPC}}$ 则反映 pipeline 饱和度和 warp scheduler 的竞争程度。即使一个 compute-bound Kernel 与一个 memory-bound Kernel 共置，若前者 IPC 已接近硬件上限，后者仍可能因 warp scheduler 竞争而出现明显性能下降。
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{北航硕博士学位论文 LaTeX 4.1.0/pic/heatmap_sigma_b1.png}
+        \caption{\(batch \ size=1\) }
+        \label{fig:heatmap-sigma-b1}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{北航硕博士学位论文 LaTeX 4.1.0/pic/heatmap_sigma_b4.png}
+        \caption{\(batch \ size =4\) }
+        \label{fig:heatmap-sigma-b4}
+    \end{subfigure}
+    \caption{不同批大小下 MLWD 干扰敏感度特征组的热力图对比}
+    \label{fig:heatmap-sigma-batch-compare}
+\end{figure}
 
-四维干扰敏感度向量与资源消耗量特征之间可能存在一定相关性。本文将在第六章通过消融实验分别验证干扰敏感度向量、算子时间交错特征和 IPC 指标的独立贡献，并据此评估是否有必要进一步精简本层特征维度。
+执行模式特征组用于补充描述任务在时间维度上的执行行为。已有研究表明，共置干扰不仅与单个 Kernel 的资源消耗有关，也与多个 Kernel 的执行顺序及时间重叠模式密切相关。本组包括以下特征：Kernel Launch 间隔 $\bar{g}_{\text{launch}}$ 用于反映框架调度粒度和调度效率；Attention 时间占比 $r_{\mathrm{attn}}$ 和 FFN 时间占比 $r_{\mathrm{ffn}}$ 描述两类主要算子的时间分布；计算-访存交替频率 $f_{\text{switch}}$ 反映 compute-bound Kernel 和 memory-bound Kernel 在单位时间内的切换次数，有助于判断共置任务在时间上是否容易发生重叠；平均 IPC $\overline{\text{IPC}}$ 则反映 pipeline 饱和度和 warp scheduler 的竞争程度。即使一个 compute-bound Kernel 与一个 memory-bound Kernel 共置，若前者 IPC 已接近硬件上限，后者仍可能因 warp scheduler 竞争而出现明显性能下降。
 
 本层所有特征均为连续型变量，统一采用 Min-Max 归一化编码：
 \[
