@@ -69,7 +69,12 @@ def main():
         if v.get("batch_size") == 4:
             sensitivity[k] = v
 
+    # 加载 CI 数据（从 torch profiler + 理论 FLOPs 估算）
+    ci_data = load_json("mlwd_output/mlwd_results_ci.json")
+
     print(f"Loaded nsys: {len(nsys_clean)} entries")
+    print(f"Loaded sensitivity: {len(sensitivity)} entries")
+    print(f"Loaded CI: {len(ci_data)} entries")
     print(f"Loaded sensitivity: {len(sensitivity)} entries")
 
     # 目标实验矩阵
@@ -159,11 +164,20 @@ def main():
                 else:
                     entry["nsys_source"] = "missing"
 
+                # 3. 填充 CI 数据（从 profiler + 理论 FLOPs）
+                ci_key = f"b{b}_s{s}"
+                if ci_key in ci_data:
+                    ci = ci_data[ci_key]
+                    for field in ["ci_attn", "ci_ffn", "attn_tflops", "ffn_tflops"]:
+                        if field in ci and ci[field] is not None:
+                            entry[field] = ci[field]
+
                 # 标记数据完整度
                 has_sensitivity = all(entry.get(f"sigma_{d}") is not None
                                      for d in ["bs", "cu", "l2", "bw"])
                 has_nsys = entry.get("t_ffn") is not None
-                entry["data_complete"] = has_sensitivity and has_nsys
+                has_ci = entry.get("ci_ffn") is not None
+                entry["data_complete"] = has_sensitivity and has_nsys and has_ci
 
                 complete[key] = entry
 
@@ -173,9 +187,14 @@ def main():
     n_sens = sum(1 for v in complete.values()
                  if all(v.get(f"sigma_{d}") is not None for d in ["bs", "cu", "l2", "bw"]))
     n_nsys = sum(1 for v in complete.values() if v.get("t_ffn") is not None)
+    n_ci = sum(1 for v in complete.values() if v.get("ci_ffn") is not None)
 
     print(f"\n=== Complete MLWD Data ===")
     print(f"Total entries: {total}")
+    print(f"With sensitivity: {n_sens}/{total}")
+    print(f"With nsys: {n_nsys}/{total}")
+    print(f"With CI: {n_ci}/{total}")
+    print(f"Fully complete: {n_complete}/{total}")
     print(f"With sensitivity: {n_sens}/{total}")
     print(f"With nsys: {n_nsys}/{total}")
     print(f"Fully complete: {n_complete}/{total}")

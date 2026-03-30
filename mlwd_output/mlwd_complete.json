@@ -24,6 +24,10 @@
     "num_attn_kernels": 7936,
     "num_ffn_kernels": 3021,
     "nsys_source": "measured",
+    "ci_attn": 0.3476,
+    "ci_ffn": 1.1374,
+    "attn_tflops": 0.31,
+    "ffn_tflops": 1.02,
     "data_complete": true
   },
   "b1_s32_decode": {
@@ -51,6 +55,10 @@
     "num_attn_kernels": 7936,
     "num_ffn_kernels": 3021,
     "nsys_source": "measured",
+    "ci_attn": 0.3476,
+    "ci_ffn": 1.1374,
+    "attn_tflops": 0.31,
+    "ffn_tflops": 1.02,
     "data_complete": true
   },
   "b1_s64_prefill": {
@@ -78,6 +86,10 @@
     "num_attn_kernels": 7938,
     "num_ffn_kernels": 3021,
     "nsys_source": "measured",
+    "ci_attn": 0.5711,
+    "ci_ffn": 1.7984,
+    "attn_tflops": 0.51,
+    "ffn_tflops": 1.62,
     "data_complete": true
   },
   "b1_s64_decode": {
@@ -105,6 +117,10 @@
     "num_attn_kernels": 7938,
     "num_ffn_kernels": 3021,
     "nsys_source": "measured",
+    "ci_attn": 0.5711,
+    "ci_ffn": 1.7984,
+    "attn_tflops": 0.51,
+    "ffn_tflops": 1.62,
     "data_complete": true
   },
   "b1_s128_prefill": {
@@ -132,6 +148,10 @@
     "num_attn_kernels": 7931,
     "num_ffn_kernels": 3019,
     "nsys_source": "measured",
+    "ci_attn": 1.1305,
+    "ci_ffn": 3.106,
+    "attn_tflops": 1.02,
+    "ffn_tflops": 2.8,
     "data_complete": true
   },
   "b1_s128_decode": {
@@ -159,6 +179,10 @@
     "num_attn_kernels": 7931,
     "num_ffn_kernels": 3019,
     "nsys_source": "measured",
+    "ci_attn": 1.1305,
+    "ci_ffn": 3.106,
+    "attn_tflops": 1.02,
+    "ffn_tflops": 2.8,
     "data_complete": true
   },
   "b4_s32_prefill": {
@@ -186,6 +210,10 @@
     "num_attn_kernels": 28,
     "num_ffn_kernels": 113,
     "nsys_source": "measured",
+    "ci_attn": 1.6747,
+    "ci_ffn": 3.2841,
+    "attn_tflops": 1.51,
+    "ffn_tflops": 2.96,
     "data_complete": true
   },
   "b4_s32_decode": {
@@ -213,6 +241,10 @@
     "num_attn_kernels": 84,
     "num_ffn_kernels": 29,
     "nsys_source": "measured",
+    "ci_attn": 1.6747,
+    "ci_ffn": 3.2841,
+    "attn_tflops": 1.51,
+    "ffn_tflops": 2.96,
     "data_complete": true
   },
   "b4_s64_prefill": {
@@ -240,6 +272,10 @@
     "num_attn_kernels": 112,
     "num_ffn_kernels": 226,
     "nsys_source": "measured",
+    "ci_attn": 2.2,
+    "ci_ffn": 4.8548,
+    "attn_tflops": 1.98,
+    "ffn_tflops": 4.37,
     "data_complete": true
   },
   "b4_s64_decode": {
@@ -267,6 +303,10 @@
     "num_attn_kernels": 168,
     "num_ffn_kernels": 339,
     "nsys_source": "measured",
+    "ci_attn": 2.2,
+    "ci_ffn": 4.8548,
+    "attn_tflops": 1.98,
+    "ffn_tflops": 4.37,
     "data_complete": true
   },
   "b4_s128_prefill": {
@@ -294,6 +334,10 @@
     "num_attn_kernels": 5376,
     "num_ffn_kernels": 1856,
     "nsys_source": "measured",
+    "ci_attn": 3.7921,
+    "ci_ffn": 8.0592,
+    "attn_tflops": 3.41,
+    "ffn_tflops": 7.25,
     "data_complete": true
   },
   "b4_s128_decode": {
@@ -321,6 +365,10 @@
     "num_attn_kernels": 8064,
     "num_ffn_kernels": 2784,
     "nsys_source": "measured",
+    "ci_attn": 3.7921,
+    "ci_ffn": 8.0592,
+    "attn_tflops": 3.41,
+    "ffn_tflops": 7.25,
     "data_complete": true
   }
 }
