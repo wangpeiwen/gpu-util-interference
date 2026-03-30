@@ -50,6 +50,8 @@ def main():
     parser.add_argument("--seq_lengths", type=int, nargs="+", default=[32])
     parser.add_argument("--phases", type=str, nargs="+", default=["prefill", "decode"],
                         choices=["prefill", "decode"])
+    parser.add_argument("--max_tokens", type=int, default=32,
+                        help="decode 阶段生成的 token 数")
     parser.add_argument("--num_runs", type=int, default=3,
                         help="每个实验点的推理次数")
     parser.add_argument("--warmup_runs", type=int, default=2)
@@ -90,13 +92,13 @@ def main():
         print(f"Profiling: {key}")
         print(f"{'='*50}")
 
-        # 构造输入
+        # 构造输入：长 prompt (prefill) + 生成 max_tokens 个 token (decode)
         if phase == "prefill":
             base_text = "hello " * (s * 2)
             token_ids = tokenizer.encode(base_text)[:s]
             prompt = tokenizer.decode(token_ids)
             prompts = [prompt] * b
-            sp = SamplingParams(max_tokens=1, temperature=0)
+            sp = SamplingParams(max_tokens=args.max_tokens, temperature=0)
         else:
             prompts = ["The"] * b
             sp = SamplingParams(max_tokens=s, temperature=0)
