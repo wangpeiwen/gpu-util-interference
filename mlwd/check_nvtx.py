@@ -1,24 +1,36 @@
 import sqlite3
+import statistics
 
 conn = sqlite3.connect('/tmp/mlwd_trace.sqlite')
 
-str_ids = {}
-for r in conn.execute("SELECT id, value FROM StringIds").fetchall():
-    str_ids[r[0]] = r[1]
+# kernel gaps 分布
+rows = conn.execute("""
+    SELECT start, end FROM CUPTI_ACTIVITY_KIND_KERNEL ORDER BY start
+""").fetchall()
 
-print("=== NVTX ranges (start, end) ===")
-for r in conn.execute("SELECT text, start, end FROM NVTX_EVENTS ORDER BY start").fetchall():
-    text = r[0]
-    if isinstance(text, int):
-        text = str_ids.get(text, str(text))
-    print(f"  {text}: start={r[1]} end={r[2]} dur={r[2]-r[1] if r[2] else 'None'}")
+gaps = []
+for i in range(1, len(rows)):
+    gap = rows[i][0] - rows[i-1][1]
+    gaps.append(gap)
 
-print("\n=== Kernel time range ===")
-row = conn.execute("SELECT MIN(start) as mn, MAX(end) as mx FROM CUPTI_ACTIVITY_KIND_KERNEL").fetchone()
-print(f"  Kernel min_start={row[0]} max_end={row[1]}")
+gaps_sorted = sorted(gaps)
+print(f"Total kernels: {len(rows)}")
+print(f"Total gaps: {len(gaps)}")
+print(f"Gap percentiles (ns):")
+for p in [50, 75, 90, 95, 99, 99.5, 99.9]:
+    idx = int(len(gaps_sorted) * p / 100)
+    print(f"  p{p}: {gaps_sorted[idx]:,}")
+print(f"  max: {gaps_sorted[-1]:,}")
 
-print("\n=== NVTX time range ===")
-row2 = conn.execute("SELECT MIN(start) as mn, MAX(end) as mx FROM NVTX_EVENTS").fetchone()
-print(f"  NVTX min_start={row2[0]} max_end={row2[1]}")
+# 大 gap 的位置
+print(f"\nGaps > 10ms:")
+for i, g in enumerate(gaps):
+    if g > 10_000_000:
+        print(f"  between kernel {i} and {i+1}: {g/1e6:.1f} ms")
+
+print(f"\nGaps > 1ms (count): {sum(1 for g in gaps if g > 1_000_000)}")
+print(f"Gaps > 10ms (count): {sum(1 for g in gaps if g > 10_000_000)}")
+print(f"Gaps > 100ms (count): {sum(1 for g in gaps if g > 100_000_000)}")
+print(f"Gaps > 1s (count): {sum(1 for g in gaps if g > 1_000_000_000)}")
 
 conn.close()

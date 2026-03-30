@@ -32,44 +32,35 @@ from mlwd.profiling.ncu_metrics import parse_ncu_csv
 
 def parse_nsys_trace(sqlite_path: str, meta_path: str = None) -> Dict[str, dict]:
     """
-    解析 nsys SQLite trace，按 kernel 时间间隔中的大 gap 分段。
+    解析 nsys SQLite trace。
 
     由于 NVTX marker（主进程 CPU 时间）和 kernel（子进程 GPU 时间）
-    在不同时间域，无法直接用 NVTX 时间范围匹配 kernel。
-    改为：用 kernel 之间的大时间间隔作为分段边界，
-    再用 NVTX 的顺序给每段命名。
-
-    Args:
-        sqlite_path: nsys 导出的 SQLite 文件
-        meta_path: run_profiling.py 输出的元数据 JSON（可选，用于验证）
+    在不同时间域，用 NVTX 的相对时间比例映射到 kernel 时间轴上分段。
     """
     conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
 
-    # 获取 NVTX ranges 的顺序（用于命名）
-    nvtx_keys = []
+    # 获取 NVTX ranges
+    nvtx_runs = []  # [(key, start, end), ...]  每个 run 一条
     try:
         str_ids = {}
         for r in conn.execute("SELECT id, value FROM StringIds").fetchall():
             str_ids[r[0]] = r[1]
 
         rows = conn.execute("""
-            SELECT text, start FROM NVTX_EVENTS
+            SELECT text, start, end FROM NVTX_EVENTS
             WHERE eventType = 59 OR eventType = 60
             ORDER BY start ASC
         """).fetchall()
 
-        seen = set()
         for r in rows:
             text = r["text"]
             if isinstance(text, int):
                 text = str_ids.get(text, str(text))
-            # 去掉 _runN 后缀，去重
-            parts = str(text).rsplit("_run", 1)
-            key = parts[0] if len(parts) == 2 else str(text)
-            if key not in seen:
-                seen.add(key)
-                nvtx_keys.append(key)
+            text = str(text)
+            parts = text.rsplit("_run", 1)
+            key = parts[0] if len(parts) == 2 else text
+            nvtx_runs.append((key, r["start"], r["end"]))
     except sqlite3.OperationalError:
         pass
 
@@ -100,66 +91,70 @@ def parse_nsys_trace(sqlite_path: str, meta_path: str = None) -> Dict[str, dict]
         print("[NSYS] No kernels found in trace")
         return {}
 
-    print(f"[NSYS] Total kernels: {len(kernels)}, NVTX keys: {nvtx_keys}")
+    print(f"[NSYS] Total kernels: {len(kernels)}, NVTX runs: {len(nvtx_runs)}")
 
-    # 按大 gap 分段
-    segments = _split_by_gaps(kernels)
-    print(f"[NSYS] Found {len(segments)} segments by gap detection")
+    if not nvtx_runs:
+        features = _compute_segment_features(kernels)
+        return {"all": features} if features else {}
 
-    # 跳过第一段（模型加载 + warmup），剩余段与 NVTX keys 对齐
-    # run_profiling.py 的结构：每个实验点有 warmup + num_runs 次推理
-    # warmup 和实际 run 之间的 gap 较小，实验点之间的 gap 较大
-    # 所以大 gap 分出的段对应每个实验点（包含 warmup + runs）
+    # 按 NVTX 相对时间比例映射到 kernel 时间轴
+    return _map_nvtx_to_kernels(kernels, nvtx_runs)
 
+
+def _map_nvtx_to_kernels(kernels, nvtx_runs) -> Dict[str, dict]:
+    """
+    用 NVTX 的相对时间比例映射到 kernel 时间轴上分段。
+
+    思路：NVTX 和 kernel 虽然时间域不同，但时间流逝的比例一致。
+    将 NVTX 的 [min_start, max_end] 线性映射到 kernel 的 [min_start, max_end]，
+    然后按映射后的时间范围筛选 kernel。
+    """
+    nvtx_min = min(r[1] for r in nvtx_runs)
+    nvtx_max = max(r[2] for r in nvtx_runs)
+    nvtx_span = nvtx_max - nvtx_min
+
+    kern_min = kernels[0]["start"]
+    kern_max = kernels[-1]["end"]
+    kern_span = kern_max - kern_min
+
+    if nvtx_span <= 0 or kern_span <= 0:
+        return {}
+
+    def nvtx_to_kern(t):
+        """将 NVTX 时间映射到 kernel 时间。"""
+        ratio = (t - nvtx_min) / nvtx_span
+        return kern_min + ratio * kern_span
+
+    # 按实验点 key 聚合 runs
+    from collections import defaultdict
+    key_ranges = defaultdict(list)  # key -> [(mapped_start, mapped_end), ...]
+
+    for key, start, end in nvtx_runs:
+        mapped_start = nvtx_to_kern(start)
+        mapped_end = nvtx_to_kern(end)
+        key_ranges[key].append((mapped_start, mapped_end))
+
+    # 对每个实验点，合并所有 run 的 kernel
     results = {}
-    for i, seg_kernels in enumerate(segments):
-        if i < len(nvtx_keys):
-            key = nvtx_keys[i]
-        else:
-            key = f"segment_{i}"
+    for key, ranges in key_ranges.items():
+        segment_kernels = []
+        for mapped_start, mapped_end in ranges:
+            for k in kernels:
+                if k["start"] >= mapped_start and k["end"] <= mapped_end:
+                    segment_kernels.append(k)
 
-        features = _compute_segment_features(seg_kernels)
+        if not segment_kernels:
+            print(f"  [NSYS] {key}: no kernels matched (ranges: {len(ranges)})")
+            continue
+
+        features = _compute_segment_features(segment_kernels)
         if features:
             results[key] = features
+            print(f"  [NSYS] {key}: {features.get('num_kernels', 0)} kernels, "
+                  f"{features.get('num_attn_kernels', 0)} attn, "
+                  f"{features.get('num_ffn_kernels', 0)} ffn")
 
     return results
-
-
-def _split_by_gaps(kernels, min_gap_ratio: float = 10.0) -> List[list]:
-    """
-    按 kernel 之间的大时间间隔分段。
-
-    大 gap 定义：间隔 > 中位间隔 * min_gap_ratio
-    """
-    if len(kernels) <= 1:
-        return [list(kernels)]
-
-    # 计算所有间隔
-    gaps = []
-    for i in range(1, len(kernels)):
-        gap = kernels[i]["start"] - kernels[i-1]["end"]
-        gaps.append(gap)
-
-    # 用中位数的倍数作为阈值
-    sorted_gaps = sorted(gaps)
-    median_gap = sorted_gaps[len(sorted_gaps) // 2]
-    threshold = max(median_gap * min_gap_ratio, 100_000_000)  # 至少 100ms
-
-    # 分段
-    segments = []
-    current = [kernels[0]]
-    for i in range(1, len(kernels)):
-        if gaps[i-1] > threshold:
-            segments.append(current)
-            current = [kernels[i]]
-        else:
-            current.append(kernels[i])
-    segments.append(current)
-
-    return segments
-
-
-def _compute_segment_features(kernels) -> Optional[dict]:
     """从一段 kernel 列表计算 MLWD 执行模式特征。"""
     if not kernels:
         return None
