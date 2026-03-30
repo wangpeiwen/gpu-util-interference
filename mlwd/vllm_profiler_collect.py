@@ -106,9 +106,6 @@ def main():
             "torch_profiler_dir": args.profile_dir,
         },
     )
-        trust_remote_code=True,
-        enforce_eager=True,
-    )
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     print("Model loaded.\n")
 
