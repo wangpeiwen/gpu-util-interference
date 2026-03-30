@@ -42,29 +42,46 @@ def parse_nsys_trace(sqlite_path: str) -> Dict[str, dict]:
     # 获取 NVTX ranges（实验点标记）
     nvtx_ranges = []
     try:
+        # text 字段可能是 StringIds 的 ID，也可能直接是字符串
         rows = conn.execute("""
             SELECT text, start, end
             FROM NVTX_EVENTS
-            WHERE eventType = 59
+            WHERE eventType = 59 OR eventType = 60
             ORDER BY start ASC
         """).fetchall()
-        nvtx_ranges = [(r["text"], r["start"], r["end"]) for r in rows]
+        # 构建 StringIds 查找表
+        str_ids = {}
+        try:
+            for r in conn.execute("SELECT id, value FROM StringIds").fetchall():
+                str_ids[r[0]] = r[1]
+        except sqlite3.OperationalError:
+            pass
+
+        for r in rows:
+            text = r["text"]
+            # 如果 text 是整数，从 StringIds 解析
+            if isinstance(text, int):
+                text = str_ids.get(text, str(text))
+            if text and ("_run" in str(text) or text.startswith("b")):
+                nvtx_ranges.append((str(text), r["start"], r["end"]))
     except sqlite3.OperationalError:
         print("[NSYS] No NVTX_EVENTS table, treating entire trace as one segment")
 
-    # 获取所有 CUDA kernel
+    # 获取所有 CUDA kernel，join StringIds 解析名称
     try:
         kernels = conn.execute("""
-            SELECT demangledName as name, start, end, (end - start) as duration_ns
-            FROM CUPTI_ACTIVITY_KIND_KERNEL
-            ORDER BY start ASC
+            SELECT s.value as name, k.start, k.end, (k.end - k.start) as duration_ns
+            FROM CUPTI_ACTIVITY_KIND_KERNEL k
+            JOIN StringIds s ON k.demangledName = s.id
+            ORDER BY k.start ASC
         """).fetchall()
     except sqlite3.OperationalError:
         try:
             kernels = conn.execute("""
-                SELECT shortName as name, start, end, (end - start) as duration_ns
-                FROM CUPTI_ACTIVITY_KIND_KERNEL
-                ORDER BY start ASC
+                SELECT s.value as name, k.start, k.end, (k.end - k.start) as duration_ns
+                FROM CUPTI_ACTIVITY_KIND_KERNEL k
+                JOIN StringIds s ON k.shortName = s.id
+                ORDER BY k.start ASC
             """).fetchall()
         except sqlite3.OperationalError:
             conn.close()
