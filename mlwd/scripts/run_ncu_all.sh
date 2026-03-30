@@ -60,8 +60,8 @@ for b in "${BATCH_SIZES[@]}"; do
     echo "[${count}/${total}] ${key} (ncu profiling)"
     echo "============================================"
 
-    # ncu profile
-    ${NCU} \
+    # ncu profile (VLLM_USE_V1=0 强制单进程引擎)
+    VLLM_USE_V1=0 ${NCU} \
       --csv \
       --metrics ${METRICS} \
       --kernel-name-base demangled \
