@@ -159,7 +159,9 @@ def main():
 
         # 解析 trace
         trace_files = glob.glob(os.path.join(args.profile_dir, "**/*.json"), recursive=True)
+        trace_files += glob.glob(os.path.join(args.profile_dir, "**/*.json.gz"), recursive=True)
         trace_files += glob.glob(os.path.join(args.profile_dir, "**/*.pt.trace.json"), recursive=True)
+        trace_files += glob.glob(os.path.join(args.profile_dir, "**/*.pt.trace.json.gz"), recursive=True)
 
         print(f"  Trace files: {trace_files}")
 
@@ -175,8 +177,13 @@ def main():
             print(f"  Parsing: {trace_path} ({os.path.getsize(trace_path)} bytes)")
 
             try:
-                with open(trace_path) as f:
-                    trace = json.load(f)
+                import gzip
+                if trace_path.endswith(".gz"):
+                    with gzip.open(trace_path, "rt") as f:
+                        trace = json.load(f)
+                else:
+                    with open(trace_path) as f:
+                        trace = json.load(f)
 
                 events = trace if isinstance(trace, list) else trace.get("traceEvents", [])
                 print(f"  Total events: {len(events)}")
