@@ -49,8 +49,8 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model, dtype=torch_dtype, trust_remote_code=True
-    ).cuda()
+        args.model, dtype=torch_dtype, device_map="auto", trust_remote_code=True
+    )
     model.eval()
     print("Model loaded.\n")
 
