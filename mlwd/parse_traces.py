@@ -30,41 +30,15 @@ from mlwd.profiling.kernel_classifier import classify_kernel, KernelCategory
 from mlwd.profiling.ncu_metrics import parse_ncu_csv
 
 
-def parse_nsys_trace(sqlite_path: str, meta_path: str = None) -> Dict[str, dict]:
+def parse_nsys_trace(sqlite_path: str, key: str = None, meta_path: str = None) -> Dict[str, dict]:
     """
-    解析 nsys SQLite trace。
+    解析 nsys SQLite trace，将整个 trace 作为一个实验点。
 
-    由于 NVTX marker（主进程 CPU 时间）和 kernel（子进程 GPU 时间）
-    在不同时间域，用 NVTX 的相对时间比例映射到 kernel 时间轴上分段。
+    每次 nsys 只跑一个实验点，用 --key 指定名称。
     """
     conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
 
-    # 获取 NVTX ranges
-    nvtx_runs = []  # [(key, start, end), ...]  每个 run 一条
-    try:
-        str_ids = {}
-        for r in conn.execute("SELECT id, value FROM StringIds").fetchall():
-            str_ids[r[0]] = r[1]
-
-        rows = conn.execute("""
-            SELECT text, start, end FROM NVTX_EVENTS
-            WHERE eventType = 59 OR eventType = 60
-            ORDER BY start ASC
-        """).fetchall()
-
-        for r in rows:
-            text = r["text"]
-            if isinstance(text, int):
-                text = str_ids.get(text, str(text))
-            text = str(text)
-            parts = text.rsplit("_run", 1)
-            key = parts[0] if len(parts) == 2 else text
-            nvtx_runs.append((key, r["start"], r["end"]))
-    except sqlite3.OperationalError:
-        pass
-
-    # 获取所有 CUDA kernel
     try:
         kernels = conn.execute("""
             SELECT s.value as name, k.start, k.end, (k.end - k.start) as duration_ns
@@ -91,14 +65,19 @@ def parse_nsys_trace(sqlite_path: str, meta_path: str = None) -> Dict[str, dict]
         print("[NSYS] No kernels found in trace")
         return {}
 
-    print(f"[NSYS] Total kernels: {len(kernels)}, NVTX runs: {len(nvtx_runs)}")
+    print(f"[NSYS] Total kernels: {len(kernels)}")
 
-    if not nvtx_runs:
-        features = _compute_segment_features(kernels)
-        return {"all": features} if features else {}
+    # 跳过前 20% 的 kernel（模型加载 + warmup）
+    skip = len(kernels) // 5
+    inference_kernels = kernels[skip:]
+    print(f"[NSYS] Using kernels [{skip}:] ({len(inference_kernels)} kernels, skipped {skip} warmup)")
 
-    # 按 NVTX 相对时间比例映射到 kernel 时间轴
-    return _map_nvtx_to_kernels(kernels, nvtx_runs)
+    features = _compute_segment_features(inference_kernels)
+    if not features:
+        return {}
+
+    result_key = key or "profile"
+    return {result_key: features}
 
 
 def _map_nvtx_to_kernels(kernels, nvtx_runs) -> Dict[str, dict]:
@@ -155,6 +134,9 @@ def _map_nvtx_to_kernels(kernels, nvtx_runs) -> Dict[str, dict]:
                   f"{features.get('num_ffn_kernels', 0)} ffn")
 
     return results
+
+
+def _compute_segment_features(kernels) -> Optional[dict]:
     """从一段 kernel 列表计算 MLWD 执行模式特征。"""
     if not kernels:
         return None
@@ -296,6 +278,8 @@ def main():
                         help="输出 JSON 路径")
     parser.add_argument("--prefix", type=str, default="",
                         help="key 前缀（如模型名）")
+    parser.add_argument("--key", type=str, default=None,
+                        help="nsys 实验点名称，如 b1_s32_prefill")
     args = parser.parse_args()
 
     if not args.nsys and not args.ncu:
@@ -303,7 +287,7 @@ def main():
 
     if args.nsys:
         print(f"[NSYS] Parsing: {args.nsys}")
-        nsys_data = parse_nsys_trace(args.nsys)
+        nsys_data = parse_nsys_trace(args.nsys, key=args.key)
         print(f"[NSYS] Extracted {len(nsys_data)} segments")
         for key, features in nsys_data.items():
             print(f"  {key}: {len(features)} features")

@@ -105,6 +105,7 @@ def main():
         for _ in range(args.warmup_runs):
             llm.generate(prompts, sp)
         torch.cuda.synchronize()
+        time.sleep(0.5)  # 制造 500ms gap，方便 nsys trace 分段
 
         # NVTX marker + 推理
         latencies = []
