@@ -4,15 +4,26 @@
 用 nsys 或 ncu 包装本脚本运行，避免每个实验点重新加载模型。
 每个实验点用 NVTX marker 标记，方便从 trace 中区分。
 
+注意：vLLM V1 引擎在子进程中执行 GPU 操作，nsys 需要加
+--trace-fork-before-exec=true 才能捕获 CUDA kernel 数据。
+
 Usage:
     # 直接运行（验证推理正常）
     python mlwd/run_profiling.py --model /data/Qwen/Qwen2.5-7B-Instruct --batch_sizes 1 --seq_lengths 32
 
-    # nsys 采集
+    # nsys 采集（必须加 --trace-fork-before-exec=true 跟踪子进程）
     /opt/nvidia/nsight-compute/2025.1.1/host/target-linux-x64/nsys profile \
-      -o /tmp/mlwd_trace --trace cuda,nvtx --sample none --cpuctxsw none \
+      -o /tmp/mlwd_trace --trace cuda,nvtx \
+      --trace-fork-before-exec=true --cuda-graph-trace=node \
+      --sample none --cpuctxsw none --force-overwrite true \
       python mlwd/run_profiling.py --model /data/Qwen/Qwen2.5-7B-Instruct \
         --batch_sizes 1 4 --seq_lengths 32 64 128
+
+    # nsys 导出 SQLite + 查看 kernel 统计
+    /opt/nvidia/nsight-compute/2025.1.1/host/target-linux-x64/nsys export \
+      --type sqlite --output /tmp/mlwd_trace.sqlite --force-overwrite true /tmp/mlwd_trace.nsys-rep
+    /opt/nvidia/nsight-compute/2025.1.1/host/target-linux-x64/nsys stats \
+      --report cuda_gpu_kern_sum --force-export=true /tmp/mlwd_trace.nsys-rep
 
     # ncu 采集（建议单个 phase，减少时间）
     ncu --csv --metrics <metrics> --replay-mode application \
