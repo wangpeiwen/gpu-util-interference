@@ -30,44 +30,50 @@ from mlwd.profiling.kernel_classifier import classify_kernel, KernelCategory
 from mlwd.profiling.ncu_metrics import parse_ncu_csv
 
 
-def parse_nsys_trace(sqlite_path: str) -> Dict[str, dict]:
+def parse_nsys_trace(sqlite_path: str, meta_path: str = None) -> Dict[str, dict]:
     """
-    解析 nsys SQLite trace，按 NVTX marker 分段提取特征。
+    解析 nsys SQLite trace，按 kernel 时间间隔中的大 gap 分段。
 
-    返回 {key: {t_attn, t_ffn, g_launch, r_attn, r_ffn, f_switch, ...}}
+    由于 NVTX marker（主进程 CPU 时间）和 kernel（子进程 GPU 时间）
+    在不同时间域，无法直接用 NVTX 时间范围匹配 kernel。
+    改为：用 kernel 之间的大时间间隔作为分段边界，
+    再用 NVTX 的顺序给每段命名。
+
+    Args:
+        sqlite_path: nsys 导出的 SQLite 文件
+        meta_path: run_profiling.py 输出的元数据 JSON（可选，用于验证）
     """
     conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
 
-    # 获取 NVTX ranges（实验点标记）
-    nvtx_ranges = []
+    # 获取 NVTX ranges 的顺序（用于命名）
+    nvtx_keys = []
     try:
-        # text 字段可能是 StringIds 的 ID，也可能直接是字符串
+        str_ids = {}
+        for r in conn.execute("SELECT id, value FROM StringIds").fetchall():
+            str_ids[r[0]] = r[1]
+
         rows = conn.execute("""
-            SELECT text, start, end
-            FROM NVTX_EVENTS
+            SELECT text, start FROM NVTX_EVENTS
             WHERE eventType = 59 OR eventType = 60
             ORDER BY start ASC
         """).fetchall()
-        # 构建 StringIds 查找表
-        str_ids = {}
-        try:
-            for r in conn.execute("SELECT id, value FROM StringIds").fetchall():
-                str_ids[r[0]] = r[1]
-        except sqlite3.OperationalError:
-            pass
 
+        seen = set()
         for r in rows:
             text = r["text"]
-            # 如果 text 是整数，从 StringIds 解析
             if isinstance(text, int):
                 text = str_ids.get(text, str(text))
-            if text and ("_run" in str(text) or text.startswith("b")):
-                nvtx_ranges.append((str(text), r["start"], r["end"]))
+            # 去掉 _runN 后缀，去重
+            parts = str(text).rsplit("_run", 1)
+            key = parts[0] if len(parts) == 2 else str(text)
+            if key not in seen:
+                seen.add(key)
+                nvtx_keys.append(key)
     except sqlite3.OperationalError:
-        print("[NSYS] No NVTX_EVENTS table, treating entire trace as one segment")
+        pass
 
-    # 获取所有 CUDA kernel，join StringIds 解析名称
+    # 获取所有 CUDA kernel
     try:
         kernels = conn.execute("""
             SELECT s.value as name, k.start, k.end, (k.end - k.start) as duration_ns
@@ -94,50 +100,63 @@ def parse_nsys_trace(sqlite_path: str) -> Dict[str, dict]:
         print("[NSYS] No kernels found in trace")
         return {}
 
-    # 如果有 NVTX marker，按 marker 分段
-    if nvtx_ranges:
-        return _parse_by_nvtx(kernels, nvtx_ranges)
-    else:
-        # 整个 trace 作为一个段
-        features = _compute_segment_features(kernels)
-        return {"all": features} if features else {}
+    print(f"[NSYS] Total kernels: {len(kernels)}, NVTX keys: {nvtx_keys}")
 
+    # 按大 gap 分段
+    segments = _split_by_gaps(kernels)
+    print(f"[NSYS] Found {len(segments)} segments by gap detection")
 
-def _parse_by_nvtx(kernels, nvtx_ranges) -> Dict[str, dict]:
-    """按 NVTX range 分段解析 kernel。"""
+    # 跳过第一段（模型加载 + warmup），剩余段与 NVTX keys 对齐
+    # run_profiling.py 的结构：每个实验点有 warmup + num_runs 次推理
+    # warmup 和实际 run 之间的 gap 较小，实验点之间的 gap 较大
+    # 所以大 gap 分出的段对应每个实验点（包含 warmup + runs）
+
     results = {}
-
-    for text, range_start, range_end in nvtx_ranges:
-        # 提取 key（去掉 _runN 后缀，合并同一实验点的多次 run）
-        # NVTX text 格式: "b1_s32_prefill_run0"
-        parts = text.rsplit("_run", 1)
-        key = parts[0] if len(parts) == 2 else text
-
-        # 找到这个 range 内的 kernel
-        segment_kernels = [
-            k for k in kernels
-            if k["start"] >= range_start and k["end"] <= range_end
-        ]
-
-        if not segment_kernels:
-            continue
-
-        features = _compute_segment_features(segment_kernels)
-        if not features:
-            continue
-
-        # 合并同一 key 的多次 run（取平均）
-        if key in results:
-            existing = results[key]
-            for field in features:
-                if field.endswith("_values"):
-                    existing[field].extend(features[field])
-                elif existing.get(field) is not None and features.get(field) is not None:
-                    existing[field] = (existing[field] + features[field]) / 2
+    for i, seg_kernels in enumerate(segments):
+        if i < len(nvtx_keys):
+            key = nvtx_keys[i]
         else:
+            key = f"segment_{i}"
+
+        features = _compute_segment_features(seg_kernels)
+        if features:
             results[key] = features
 
     return results
+
+
+def _split_by_gaps(kernels, min_gap_ratio: float = 10.0) -> List[list]:
+    """
+    按 kernel 之间的大时间间隔分段。
+
+    大 gap 定义：间隔 > 中位间隔 * min_gap_ratio
+    """
+    if len(kernels) <= 1:
+        return [list(kernels)]
+
+    # 计算所有间隔
+    gaps = []
+    for i in range(1, len(kernels)):
+        gap = kernels[i]["start"] - kernels[i-1]["end"]
+        gaps.append(gap)
+
+    # 用中位数的倍数作为阈值
+    sorted_gaps = sorted(gaps)
+    median_gap = sorted_gaps[len(sorted_gaps) // 2]
+    threshold = max(median_gap * min_gap_ratio, 100_000_000)  # 至少 100ms
+
+    # 分段
+    segments = []
+    current = [kernels[0]]
+    for i in range(1, len(kernels)):
+        if gaps[i-1] > threshold:
+            segments.append(current)
+            current = [kernels[i]]
+        else:
+            current.append(kernels[i])
+    segments.append(current)
+
+    return segments
 
 
 def _compute_segment_features(kernels) -> Optional[dict]:
