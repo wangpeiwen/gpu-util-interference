@@ -89,7 +89,6 @@ def main():
     args = parser.parse_args()
 
     os.environ["VLLM_USE_V1"] = "0"
-    os.environ["VLLM_TORCH_PROFILER_DIR"] = args.profile_dir
     os.makedirs(args.profile_dir, exist_ok=True)
 
     from vllm import LLM, SamplingParams
@@ -100,6 +99,13 @@ def main():
         model=args.model,
         dtype="float16",
         tensor_parallel_size=args.tp,
+        trust_remote_code=True,
+        enforce_eager=True,
+        profiler_config={
+            "profiler": "torch",
+            "torch_profiler_dir": args.profile_dir,
+        },
+    )
         trust_remote_code=True,
         enforce_eager=True,
     )
