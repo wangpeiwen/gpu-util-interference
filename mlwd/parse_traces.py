@@ -106,7 +106,7 @@ def parse_nsys_trace(sqlite_path: str, key: str = None, meta_path: str = None) -
         return {key: features} if features else {}
 
     # 多实验点模式：按 gap 分段
-    segments = _split_by_gaps(kernels, gap_threshold_ms=200)
+    segments = _split_by_gaps(kernels, gap_threshold_ms=500)
     # 第一段是模型加载 + global warmup，跳过
     inference_segments = segments[1:] if len(segments) > 1 else segments
     print(f"[NSYS] {len(segments)} segments total, {len(inference_segments)} after skipping warmup")

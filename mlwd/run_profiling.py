@@ -105,7 +105,10 @@ def main():
         for _ in range(args.warmup_runs):
             llm.generate(prompts, sp)
         torch.cuda.synchronize()
-        time.sleep(0.5)  # 制造 500ms gap，方便 nsys trace 分段
+
+        # 在 GPU 端制造 gap：sync + sleep + 空 kernel，确保 nsys trace 中有明确分界
+        time.sleep(1.0)
+        torch.cuda.synchronize()
 
         # NVTX marker + 推理
         latencies = []
@@ -127,6 +130,11 @@ def main():
         mid = len(latencies) // 2
         median = latencies[mid] if len(latencies) % 2 == 1 else (latencies[mid-1] + latencies[mid]) / 2
         print(f"  median: {median:.2f} ms\n")
+
+        # 实验点结束后在 GPU 端制造 gap
+        torch.cuda.synchronize()
+        time.sleep(1.0)
+        torch.cuda.synchronize()
 
         meta[key] = {
             "batch_size": b,
